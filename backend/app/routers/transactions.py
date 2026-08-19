@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..dependencies import require_finance, require_user
-from ..models import Attachment, EventType, LedgerEntry, Transaction
+from ..models import Attachment, EventType, LedgerEntry, Transaction, User
 from ..schemas import (
     QuickEntry,
     TransactionCreate,
@@ -22,6 +22,7 @@ from ..serializers import transaction_out
 from ..services import nlp
 from ..services.inventory import InventoryError, apply_purchase, get_item
 from ..services.ledger import (
+    NON_STAFF_EVENTS,
     LedgerError,
     load_transaction,
     post_transaction,
@@ -176,11 +177,17 @@ def list_transactions(
     return TransactionListOut(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/recent", response_model=list[TransactionOut], dependencies=[Depends(require_user)])
+@router.get("/recent", response_model=list[TransactionOut])
 def recent_transactions(
-    limit: int = Query(default=10, ge=1, le=50), db: Session = Depends(get_db)
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
 ) -> list[TransactionOut]:
-    """The last few entries, for the "what did I just do?" list."""
+    """The last few entries, for the "what did I just do?" list.
+
+    Wage and internal bookkeeping postings are hidden from anyone who is not a
+    finance role, so a server on the daily screen cannot read salaries here.
+    """
     stmt = (
         select(Transaction)
         .options(
@@ -188,9 +195,10 @@ def recent_transactions(
             selectinload(Transaction.attachments),
         )
         .order_by(Transaction.created_at.desc(), Transaction.id.desc())
-        .limit(limit)
     )
-    return [transaction_out(txn) for txn in db.scalars(stmt).all()]
+    if user is not None and not user.can_see_finances:
+        stmt = stmt.where(Transaction.event_type.not_in(NON_STAFF_EVENTS))
+    return [transaction_out(txn) for txn in db.scalars(stmt.limit(limit)).all()]
 
 
 @router.get("/{txn_id}", response_model=TransactionOut, dependencies=[Depends(require_finance)])
@@ -201,7 +209,7 @@ def get_transaction(txn_id: int, db: Session = Depends(get_db)) -> TransactionOu
     return transaction_out(txn)
 
 
-@router.post("/{txn_id}/reverse", response_model=TransactionOut, status_code=201, dependencies=[Depends(require_user)])
+@router.post("/{txn_id}/reverse", response_model=TransactionOut, status_code=201, dependencies=[Depends(require_finance)])
 def reverse(txn_id: int, reason: str = "", db: Session = Depends(get_db)) -> TransactionOut:
     """Undo a mistake by posting the mirror image, keeping the audit trail."""
     txn = load_transaction(db, txn_id)

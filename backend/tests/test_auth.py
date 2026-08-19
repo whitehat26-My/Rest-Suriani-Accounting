@@ -46,15 +46,6 @@ DAILY_ENDPOINTS = [
 ]
 
 
-@pytest.fixture()
-def auth_on(monkeypatch):
-    """Turn on authentication, as configuring Google credentials would."""
-    monkeypatch.setattr(settings, "google_client_id", "test-client-id.apps.googleusercontent.com")
-    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
-    assert settings.auth_enabled is True
-    return settings
-
-
 def make_user(db, email="owner@example.com", role=Role.OWNER, **kwargs) -> User:
     user = User(email=email, name=email.split("@")[0], role=role, google_sub=email, **kwargs)
     db.add(user)

@@ -129,10 +129,10 @@ UNIT_WORDS = (
 
 # RM50 / RM 50.20 / 50 ringgit / 50.50 / rm50k is not supported on purpose.
 _AMOUNT_PATTERNS = (
-    re.compile(r"rm\s*([0-9]+(?:[.,][0-9]{1,2})?)", re.IGNORECASE),
-    re.compile(r"([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:ringgit|rm)\b", re.IGNORECASE),
+    re.compile(r"rm\s*([0-9]{1,12}(?:[.,][0-9]{1,2})?)", re.IGNORECASE),
+    re.compile(r"([0-9]{1,12}(?:[.,][0-9]{1,2})?)\s*(?:ringgit|rm)\b", re.IGNORECASE),
 )
-_BARE_NUMBER = re.compile(r"\b([0-9]+(?:\.[0-9]{1,2})?)\b")
+_BARE_NUMBER = re.compile(r"\b([0-9]{1,12}(?:\.[0-9]{1,2})?)\b")
 _QUANTITY_PATTERN = re.compile(
     r"\b([0-9]+(?:\.[0-9]+)?)\s*(" + "|".join(sorted(UNIT_WORDS, key=len, reverse=True)) + r")\b",
     re.IGNORECASE,
@@ -164,8 +164,11 @@ def _extract_amount(text: str) -> tuple[Decimal | None, str]:
         if m.group(1) not in quantities
     ]
     if candidates:
-        best = max(candidates)
-        return best.quantize(Decimal("0.01")), str(best)
+        try:
+            best = max(candidates)
+            return best.quantize(Decimal("0.01")), str(best)
+        except InvalidOperation:  # pragma: no cover - digit cap already guards this
+            return None, ""
     return None, ""
 
 

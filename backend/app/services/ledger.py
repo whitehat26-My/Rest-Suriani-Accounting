@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -44,9 +44,27 @@ class LedgerError(ValueError):
     """Raised when a transaction cannot be posted as a valid double entry."""
 
 
+# The largest amount the NUMERIC(14,2) columns can hold is 12 integer digits.
+# Cap well below that so arithmetic (fees, tax, weighted averages) cannot push a
+# stored value over the column limit and 500 on PostgreSQL.
+MAX_AMOUNT = Decimal("9999999999.99")  # ten integer digits
+
+
 def money(value: Decimal | int | float | str) -> Decimal:
-    """Round to two decimal places using half-up, the convention for currency."""
-    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    """Round to two decimal places using half-up, the convention for currency.
+
+    A value that cannot be represented as a sane amount (NaN, infinity, or an
+    exponent so large it overflows the decimal context) raises ``LedgerError``
+    rather than surfacing as an unhandled 500. Input schemas bound amounts long
+    before this, so reaching here with a bad value means an internal caller.
+    """
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError) as exc:
+        raise LedgerError(f"Amount {value!r} is not a valid monetary value.") from exc
+    if not amount.is_finite() or abs(amount) > MAX_AMOUNT:
+        raise LedgerError(f"Amount {value!r} is outside the allowed range.")
+    return amount
 
 
 # --------------------------------------------------------------------------- #
@@ -426,6 +444,29 @@ POSTING_RULES: dict[EventType, Callable[[PostingContext], list[Leg]]] = {
     EventType.CASH_WITHDRAWAL: rule_cash_withdrawal,
 }
 
+# Events a non-finance role (STAFF) must never see in the daily "recent" list:
+# wages, payroll accruals and payments, statutory remittances, owner drawings and
+# contributions, plus the internal bookkeeping postings. Anything not here is a
+# plain sale or spend the owner records on the daily screen.
+NON_STAFF_EVENTS: frozenset[EventType] = frozenset(
+    {
+        EventType.PAY_WAGES,
+        EventType.PAYROLL_ACCRUAL,
+        EventType.PAY_NET_WAGES,
+        EventType.REMIT_STATUTORY,
+        EventType.OWNER_CONTRIBUTION,
+        EventType.OWNER_DRAWINGS,
+        EventType.LOAN_RECEIVED,
+        EventType.LOAN_REPAYMENT,
+        EventType.OPENING_INVENTORY,
+        EventType.COGS_USAGE,
+        EventType.STOCK_WASTAGE,
+        EventType.STOCK_ADJUSTMENT_GAIN,
+        EventType.DEPRECIATION,
+        EventType.BUY_EQUIPMENT,
+    }
+)
+
 # Which direction the owner perceives each event as moving money.
 EVENT_DIRECTION: dict[EventType, str] = {
     EventType.CASH_SALE: "in",
@@ -628,6 +669,18 @@ def build_legs(request: TransactionCreate) -> list[Leg]:
         },
     )
 
+    # An EXPENSE_* event must debit a real expense account. Without this a
+    # finance user could post an "expense" against Sales, Cash or Owner's Capital
+    # - it would still balance, but it would quietly distort the statements.
+    if (
+        ctx.event_type in (EventType.EXPENSE_CASH, EventType.EXPENSE_CREDIT)
+        and ctx.expense_account_code not in coa.EXPENSE_ACCOUNT_CODES
+    ):
+        raise LedgerError(
+            f"Account {ctx.expense_account_code!r} is not an expense account; "
+            "an expense cannot be posted against it."
+        )
+
     if ctx.event_type is EventType.PAYROLL_ACCRUAL:
         # The headline amount of an accrual is derived from its components, so
         # the usual tax/fee sanity checks do not apply to it.
@@ -708,6 +761,19 @@ def reverse_transaction(db: Session, txn: Transaction, *, reason: str = "") -> T
     """
     if txn.is_reversed:
         raise LedgerError(f"{txn.reference} has already been reversed.")
+    if txn.reverses_id is not None:
+        # A reversal is itself balanced; reversing it would silently re-apply the
+        # original and let the books be oscillated.
+        raise LedgerError("A reversal entry cannot itself be reversed.")
+    if txn.event_type in (
+        EventType.PAYROLL_ACCRUAL,
+        EventType.PAY_NET_WAGES,
+    ):
+        # Payroll postings are owned by a run whose status would fall out of sync
+        # with the ledger. Corrections go through the payroll workflow instead.
+        raise LedgerError(
+            "Payroll transactions cannot be reversed here; use the payroll screen."
+        )
 
     reversal = Transaction(
         reference=next_reference(db, date.today()),

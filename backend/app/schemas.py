@@ -23,6 +23,12 @@ from .models import (
 
 ORM = ConfigDict(from_attributes=True)
 
+# The biggest amount the money columns can safely hold (ten integer digits, well
+# inside NUMERIC(14,2)). Bounding inputs here turns oversized or malformed values
+# into a clean 422 instead of a 500 or a silently-overflowed row on PostgreSQL.
+MAX_AMOUNT = Decimal("9999999999.99")
+MAX_QUANTITY = Decimal("99999999.999")
+
 
 # --------------------------------------------------------------------------- #
 # Accounts
@@ -81,7 +87,7 @@ class TransactionCreate(BaseModel):
     """
 
     event_type: EventType
-    amount: Decimal = Field(gt=0, description="Headline amount, always positive")
+    amount: Decimal = Field(gt=0, le=MAX_AMOUNT, description="Headline amount, always positive")
     txn_date: date | None = None
     description: str = ""
     counterparty: str = ""
@@ -92,12 +98,13 @@ class TransactionCreate(BaseModel):
     expense_account_code: str | None = Field(
         default=None, description="Which expense account to hit for EXPENSE_* events"
     )
-    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
-    fee_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0.00"), ge=0, le=MAX_AMOUNT)
+    fee_amount: Decimal = Field(default=Decimal("0.00"), ge=0, le=MAX_AMOUNT)
     cogs_amount: Decimal = Field(
-        default=Decimal("0.00"), ge=0, description="Cost of the goods sold in this sale"
+        default=Decimal("0.00"), ge=0, le=MAX_AMOUNT,
+        description="Cost of the goods sold in this sale",
     )
-    interest_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
+    interest_amount: Decimal = Field(default=Decimal("0.00"), ge=0, le=MAX_AMOUNT)
 
     # Inventory linkage for purchase events.
     inventory_item_id: int | None = None
@@ -107,11 +114,11 @@ class TransactionCreate(BaseModel):
     liability_account_code: str | None = None
     # Named component amounts for multi-leg events such as PAYROLL_ACCRUAL,
     # where a single headline figure cannot describe the entry.
-    components: dict[str, Decimal] = Field(default_factory=dict)
+    components: dict[str, Decimal] = Field(default_factory=dict, max_length=32)
 
-    raw_input: str = ""
-    notes: str = ""
-    attachment_ids: list[int] = Field(default_factory=list)
+    raw_input: str = Field(default="", max_length=2000)
+    notes: str = Field(default="", max_length=2000)
+    attachment_ids: list[int] = Field(default_factory=list, max_length=20)
 
     @field_validator("amount", "tax_amount", "fee_amount", "cogs_amount", "interest_amount")
     @classmethod
@@ -163,21 +170,21 @@ class QuickEntry(BaseModel):
     """
 
     kind: str = Field(pattern="^(in|out)$")
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=MAX_AMOUNT)
     # For money in: how the customer paid. For money out: how we paid.
     method: PaymentMethod = PaymentMethod.CASH
     # For money out: one of the friendly slugs in SPENDING_CATEGORIES.
     category: str | None = None
-    note: str = ""
-    counterparty: str = ""
+    note: str = Field(default="", max_length=500)
+    counterparty: str = Field(default="", max_length=120)
     txn_date: date | None = None
-    raw_input: str = ""
+    raw_input: str = Field(default="", max_length=2000)
     source: TransactionSource = TransactionSource.GRANDMA_UI
-    attachment_ids: list[int] = Field(default_factory=list)
+    attachment_ids: list[int] = Field(default_factory=list, max_length=20)
     # Optional: link a "Food & Ingredients" spend to a stock item so the
     # quantity bought is added to inventory.
     inventory_item_id: int | None = None
-    quantity: Decimal | None = Field(default=None, gt=0)
+    quantity: Decimal | None = Field(default=None, gt=0, le=MAX_QUANTITY)
 
     @field_validator("amount")
     @classmethod
@@ -231,8 +238,8 @@ class InventoryItemBase(BaseModel):
 
 
 class InventoryItemCreate(InventoryItemBase):
-    opening_quantity: Decimal = Field(default=Decimal("0"), ge=0)
-    opening_unit_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    opening_quantity: Decimal = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
+    opening_unit_cost: Decimal = Field(default=Decimal("0"), ge=0, le=MAX_AMOUNT)
 
 
 class InventoryItemUpdate(BaseModel):
@@ -285,8 +292,8 @@ class StockPurchase(BaseModel):
     """Buying stock: increases quantity and recalculates weighted-average cost."""
 
     item_id: int
-    quantity: Decimal = Field(gt=0)
-    total_cost: Decimal = Field(gt=0)
+    quantity: Decimal = Field(gt=0, le=MAX_QUANTITY)
+    total_cost: Decimal = Field(gt=0, le=MAX_AMOUNT)
     paid: bool = True
     method: PaymentMethod = PaymentMethod.CASH
     supplier: str = ""
@@ -296,14 +303,14 @@ class StockPurchase(BaseModel):
 
 class StockCountEntry(BaseModel):
     item_id: int
-    counted_quantity: Decimal = Field(ge=0)
+    counted_quantity: Decimal = Field(ge=0, le=MAX_QUANTITY)
     treat_shortfall_as: MovementType = MovementType.USAGE
 
 
 class StockCountCreate(BaseModel):
     """A physical count of one or more items. Shortfalls post to COGS/wastage."""
 
-    counts: list[StockCountEntry] = Field(min_length=1)
+    counts: list[StockCountEntry] = Field(min_length=1, max_length=500)
     count_date: date | None = None
     note: str = ""
 
@@ -510,9 +517,9 @@ class EmployeeBase(BaseModel):
     position: str = "Kitchen Staff"
     employment_type: EmploymentType = EmploymentType.PERMANENT
     pay_basis: PayBasis = PayBasis.MONTHLY
-    base_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
-    fixed_allowance: Decimal = Field(default=Decimal("0.00"), ge=0)
-    overtime_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
+    base_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=MAX_AMOUNT)
+    fixed_allowance: Decimal = Field(default=Decimal("0.00"), ge=0, le=MAX_AMOUNT)
+    overtime_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=MAX_AMOUNT)
     contributes_statutory: bool = True
     is_local: bool = True
     date_of_birth: date | None = None
@@ -535,9 +542,9 @@ class EmployeeUpdate(BaseModel):
     position: str | None = None
     employment_type: EmploymentType | None = None
     pay_basis: PayBasis | None = None
-    base_rate: Decimal | None = Field(default=None, ge=0)
-    fixed_allowance: Decimal | None = Field(default=None, ge=0)
-    overtime_rate: Decimal | None = Field(default=None, ge=0)
+    base_rate: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
+    fixed_allowance: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
+    overtime_rate: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
     contributes_statutory: bool | None = None
     is_local: bool | None = None
     date_of_birth: date | None = None
@@ -563,13 +570,13 @@ class EmployeeOut(EmployeeBase):
 class PayslipUpdate(BaseModel):
     """The only fields a payroll clerk edits; everything else is derived."""
 
-    days_worked: Decimal | None = Field(default=None, ge=0)
-    hours_worked: Decimal | None = Field(default=None, ge=0)
-    overtime_hours: Decimal | None = Field(default=None, ge=0)
-    allowances: Decimal | None = Field(default=None, ge=0)
-    bonus: Decimal | None = Field(default=None, ge=0)
-    tax_deduction: Decimal | None = Field(default=None, ge=0)
-    other_deductions: Decimal | None = Field(default=None, ge=0)
+    days_worked: Decimal | None = Field(default=None, ge=0, le=Decimal("366"))
+    hours_worked: Decimal | None = Field(default=None, ge=0, le=Decimal("1000"))
+    overtime_hours: Decimal | None = Field(default=None, ge=0, le=Decimal("1000"))
+    allowances: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
+    bonus: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
+    tax_deduction: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
+    other_deductions: Decimal | None = Field(default=None, ge=0, le=MAX_AMOUNT)
     note: str | None = None
 
 
@@ -673,7 +680,7 @@ class PayrollRunSummary(BaseModel):
 
 class StatutoryRemittance(BaseModel):
     body: str = Field(pattern="^(EPF|SOCSO|EIS|TAX)$")
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(gt=0, le=MAX_AMOUNT)
     on: date | None = None
     method: PaymentMethod = PaymentMethod.BANK
 

@@ -60,3 +60,17 @@ def client(db) -> Iterator:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def auth_on(monkeypatch):
+    """Turn authentication on, as configuring Google credentials would.
+
+    Shared by the auth and security suites so both can exercise the gates.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "google_client_id", "test-client-id.apps.googleusercontent.com")
+    monkeypatch.setattr(settings, "google_client_secret", "test-secret")
+    assert settings.auth_enabled is True
+    return settings

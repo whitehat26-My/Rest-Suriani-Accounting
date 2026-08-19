@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -246,14 +246,34 @@ def update_role(
     actor: User | None = Depends(require_owner),
 ) -> UserOut:
     """Change someone's role. Owner only."""
-    target = db.get(User, user_id)
+    # Lock the target row so two simultaneous demotions cannot both pass the
+    # "is there still an owner?" check below and leave the restaurant with none.
+    target = db.execute(
+        select(User).where(User.id == user_id).with_for_update()
+    ).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if actor is not None and target.id == actor.id and payload.role is not Role.OWNER:
-        # Otherwise the last owner can lock the restaurant out of its own books.
-        raise HTTPException(
-            status_code=400, detail="You cannot remove your own owner access."
+
+    demoting_an_owner = target.role is Role.OWNER and payload.role is not Role.OWNER
+    if demoting_an_owner:
+        if actor is not None and target.id == actor.id:
+            # Otherwise the last owner can lock the restaurant out of its own books.
+            raise HTTPException(
+                status_code=400, detail="You cannot remove your own owner access."
+            )
+        remaining_owners = db.scalar(
+            select(func.count(User.id)).where(
+                User.role == Role.OWNER,
+                User.is_active.is_(True),
+                User.id != target.id,
+            )
         )
+        if not remaining_owners:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one active owner must remain. Promote someone else first.",
+            )
+
     target.role = payload.role
     db.commit()
     db.refresh(target)

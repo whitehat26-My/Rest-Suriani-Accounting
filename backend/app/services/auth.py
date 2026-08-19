@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -35,6 +35,19 @@ class AuthError(ValueError):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Coerce a stored datetime to aware UTC.
+
+    Columns are declared ``DateTime(timezone=True)``, which round-trips as
+    timezone-aware on PostgreSQL but comes back naive on SQLite. Comparing a
+    naive value against an aware ``now`` raises, so anything read back from the
+    database is normalised here before it is compared.
+    """
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 # --------------------------------------------------------------------------- #
@@ -225,33 +238,88 @@ def check_pin(db: Session, user: User, pin: str) -> None:
     The lockout is the real defence here. A six-digit PIN is only a million
     possibilities, so without a limit on attempts an attacker with the tablet
     would simply try them all.
+
+    The counter is incremented **before** the PIN is verified, in a single
+    atomic ``UPDATE ... RETURNING`` evaluated by the database. The decision to
+    check the PIN at all is then gated on the returned count. This is what makes
+    the limit hold under concurrency: a burst of parallel guesses serialises on
+    the atomic update, so only the first ``pin_max_attempts`` of them are ever
+    verified - the rest are rejected as locked without the PIN being checked.
+    An earlier version incremented in Python after a stale read, and a
+    pen-test confirmed dozens of guesses slipping through a single burst.
     """
     if not user.has_pin:
         raise AuthError("No PIN has been set yet.")
 
     now = _now()
-    if user.pin_locked_until and user.pin_locked_until > now:
-        remaining = int((user.pin_locked_until - now).total_seconds() // 60) + 1
+    max_attempts = settings.pin_max_attempts
+
+    # Atomically bump the failure counter and read the fresh state back in one
+    # statement. Because the increment is computed in the database, concurrent
+    # guesses accumulate correctly instead of all overwriting the same stale
+    # value - which is what bounds a burst to `max_attempts` real checks.
+    attempts, locked_raw = db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(pin_attempts=User.pin_attempts + 1)
+        .returning(User.pin_attempts, User.pin_locked_until)
+    ).one()
+    db.commit()
+    locked_until = _as_utc(locked_raw)
+
+    # Currently locked: reject without ever checking the PIN. The counter keeps
+    # climbing meanwhile, which is harmless.
+    if locked_until and locked_until > now:
+        remaining = int((locked_until - now).total_seconds() // 60) + 1
         raise AuthError(
             f"Too many wrong tries. Try again in {remaining} minute"
             f"{'s' if remaining != 1 else ''}."
         )
 
+    # A lock that has since expired opens a fresh window: this guess is attempt 1.
+    if locked_until and locked_until <= now:
+        db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(pin_attempts=1, pin_locked_until=None)
+        )
+        db.commit()
+        attempts = 1
+
+    def _lock() -> None:
+        db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(pin_locked_until=now + timedelta(minutes=settings.pin_lockout_minutes))
+        )
+        db.commit()
+
+    # Beyond the limit already: another guess in this same burst set the lock.
+    # Reject without checking the PIN - this is the branch that bounds a
+    # concurrent flood to at most `max_attempts` real verifications.
+    if attempts > max_attempts:
+        _lock()
+        raise AuthError(
+            f"Too many wrong tries. Locked for {settings.pin_lockout_minutes} minutes."
+        )
+
+    # Within the window (attempts 1..max). The PIN is checked; a correct one on
+    # the final allowed try still succeeds, a wrong one on it trips the lock.
     if not verify_pin(pin, user.pin_hash):
-        user.pin_attempts += 1
-        if user.pin_attempts >= settings.pin_max_attempts:
-            user.pin_locked_until = now + timedelta(minutes=settings.pin_lockout_minutes)
-            user.pin_attempts = 0
-            db.flush()
+        if attempts >= max_attempts:
+            _lock()
             raise AuthError(
                 f"Too many wrong tries. Locked for {settings.pin_lockout_minutes} minutes."
             )
-        db.flush()
-        remaining = settings.pin_max_attempts - user.pin_attempts
+        remaining = max_attempts - attempts
         raise AuthError(
             f"That PIN is not right. {remaining} tr{'y' if remaining == 1 else 'ies'} left."
         )
 
-    user.pin_attempts = 0
-    user.pin_locked_until = None
-    db.flush()
+    # Correct: clear the counter and any lock.
+    db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(pin_attempts=0, pin_locked_until=None)
+    )
+    db.commit()

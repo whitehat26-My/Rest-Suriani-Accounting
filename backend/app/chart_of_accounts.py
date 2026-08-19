@@ -159,3 +159,10 @@ SPENDING_CATEGORIES: list[tuple[str, str, str, str]] = [
 ]
 
 CATEGORY_TO_ACCOUNT: dict[str, str] = {slug: code for slug, _, _, code in SPENDING_CATEGORIES}
+
+
+# Codes of the expense accounts, so the ledger can reject an "expense" posted
+# against a non-expense account without a database round trip.
+EXPENSE_ACCOUNT_CODES: frozenset[str] = frozenset(
+    spec.code for spec in DEFAULT_ACCOUNTS if spec.type is AccountType.EXPENSE
+)
