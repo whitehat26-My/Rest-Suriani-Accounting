@@ -32,10 +32,14 @@ def resolve_period(
         return today, today
     if period == "week":
         return today - timedelta(days=6), today
+    if period == "month":
+        # Month to date. Running to the end of the calendar month would pad every
+        # chart with empty future days, which reads as "the business stopped".
+        return month_bounds(today)[0], today
     if period == "quarter":
         return today - timedelta(days=89), today
     if period == "year":
         return date(today.year, 1, 1), today
     if period == "all":
         return date(2000, 1, 1), today
-    return month_bounds(today)
+    return month_bounds(today)[0], today
