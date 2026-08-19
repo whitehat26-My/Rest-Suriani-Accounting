@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local database and uploads
+*.db
+*.sqlite3
+backend/uploads/
+!backend/uploads/.gitkeep
+
+# Environment
+.env
+.env.local
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+*.tsbuildinfo
+.DS_Store
+npm-debug.log*
