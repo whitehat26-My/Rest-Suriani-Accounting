@@ -54,9 +54,16 @@ PREPAID_EXPENSES = "1300"
 EQUIPMENT = "1500"
 ACCUM_DEPRECIATION = "1510"
 
+STAFF_ADVANCES = "1150"
+
 ACCOUNTS_PAYABLE = "2000"
 ACCRUED_EXPENSES = "2100"
 SST_PAYABLE = "2200"
+NET_WAGES_PAYABLE = "2300"
+EPF_PAYABLE = "2310"
+SOCSO_PAYABLE = "2320"
+EIS_PAYABLE = "2330"
+TAX_PAYABLE = "2340"
 LOAN_PAYABLE = "2500"
 
 OWNER_CAPITAL = "3000"
@@ -69,6 +76,7 @@ COGS = "5000"
 WASTAGE = "5010"
 
 WAGES = "6000"
+EMPLOYER_STATUTORY = "6010"
 RENT = "6100"
 UTILITIES = "6200"
 SUPPLIES = "6300"
@@ -88,6 +96,7 @@ DEFAULT_ACCOUNTS: list[AccountSpec] = [
     AccountSpec(BANK, "Bank Account", A, DR, CASH, "Current Assets", "Money in the bank", sort_order=20),
     AccountSpec(ACCOUNTS_RECEIVABLE, "Accounts Receivable", A, DR, OPS, "Current Assets", "Money customers owe us", sort_order=30),
     AccountSpec(INVENTORY, "Inventory - Food & Beverage", A, DR, OPS, "Current Assets", "Food in the store room", sort_order=40),
+    AccountSpec(STAFF_ADVANCES, "Staff Advances", A, DR, OPS, "Current Assets", "Money lent to workers", sort_order=45),
     AccountSpec(PREPAID_EXPENSES, "Prepaid Expenses", A, DR, OPS, "Current Assets", "Things paid for early", sort_order=50),
     AccountSpec(EQUIPMENT, "Kitchen Equipment", A, DR, INV, "Non-Current Assets", "Kitchen machines", sort_order=60),
     AccountSpec(
@@ -98,6 +107,11 @@ DEFAULT_ACCOUNTS: list[AccountSpec] = [
     AccountSpec(ACCOUNTS_PAYABLE, "Accounts Payable", L, CR, OPS, "Current Liabilities", "Money we owe suppliers", sort_order=10),
     AccountSpec(ACCRUED_EXPENSES, "Accrued Expenses", L, CR, OPS, "Current Liabilities", "Bills not paid yet", sort_order=20),
     AccountSpec(SST_PAYABLE, "SST Payable", L, CR, OPS, "Current Liabilities", "Tax we collected for the government", sort_order=30),
+    AccountSpec(NET_WAGES_PAYABLE, "Net Wages Payable", L, CR, OPS, "Current Liabilities", "Wages not handed over yet", sort_order=32),
+    AccountSpec(EPF_PAYABLE, "EPF Payable", L, CR, OPS, "Current Liabilities", "EPF to send to KWSP", sort_order=33),
+    AccountSpec(SOCSO_PAYABLE, "SOCSO Payable", L, CR, OPS, "Current Liabilities", "SOCSO to send to PERKESO", sort_order=34),
+    AccountSpec(EIS_PAYABLE, "EIS Payable", L, CR, OPS, "Current Liabilities", "EIS to send to PERKESO", sort_order=35),
+    AccountSpec(TAX_PAYABLE, "PCB / Income Tax Payable", L, CR, OPS, "Current Liabilities", "Worker tax to send to LHDN", sort_order=36),
     AccountSpec(LOAN_PAYABLE, "Loan Payable", L, CR, FIN, "Non-Current Liabilities", "Bank loan", sort_order=40),
     # ---------------- Equity ----------------
     AccountSpec(OWNER_CAPITAL, "Owner's Capital", E, CR, FIN, "Equity", "Money I put in", sort_order=10),
@@ -113,6 +127,7 @@ DEFAULT_ACCOUNTS: list[AccountSpec] = [
     AccountSpec(WASTAGE, "Inventory Wastage & Spoilage", X, DR, NONE, "Cost of Sales", "Food thrown away", sort_order=20),
     # ---------------- Operating expenses ----------------
     AccountSpec(WAGES, "Salaries & Wages", X, DR, NONE, "Operating Expenses", "Pay for workers", sort_order=10),
+    AccountSpec(EMPLOYER_STATUTORY, "Employer Statutory Contributions", X, DR, NONE, "Operating Expenses", "EPF and SOCSO we pay for workers", sort_order=15),
     AccountSpec(RENT, "Rent Expense", X, DR, NONE, "Operating Expenses", "Shop rent", sort_order=20),
     AccountSpec(UTILITIES, "Utilities Expense", X, DR, NONE, "Operating Expenses", "Electric, water, gas", sort_order=30),
     AccountSpec(SUPPLIES, "Supplies & Consumables", X, DR, NONE, "Operating Expenses", "Packaging, soap, gloves", sort_order=40),

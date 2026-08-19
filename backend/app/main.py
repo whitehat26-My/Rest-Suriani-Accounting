@@ -8,7 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import init_db
-from .routers import accounts, insights, inventory, reports, transactions, uploads
+from .routers import (
+    accounts,
+    insights,
+    inventory,
+    payroll,
+    reports,
+    transactions,
+    uploads,
+)
 
 DESCRIPTION = """
 An accounting system for a small restaurant, built for two very different people.
@@ -53,6 +61,7 @@ app.add_middleware(
 app.include_router(accounts.router)
 app.include_router(transactions.router)
 app.include_router(inventory.router)
+app.include_router(payroll.router)
 app.include_router(reports.router)
 app.include_router(insights.router)
 app.include_router(uploads.router)

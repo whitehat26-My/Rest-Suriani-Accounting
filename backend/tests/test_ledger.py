@@ -40,6 +40,25 @@ class TestPostingRules:
     @pytest.mark.parametrize("event_type", list(EventType))
     def test_every_rule_produces_a_balanced_entry(self, event_type):
         """The core guarantee: debits equal credits for every event type."""
+        # A couple of events carry their figures in fields of their own rather
+        # than in the headline amount, so they need those supplied here.
+        extras: dict = {}
+        if event_type is EventType.PAYROLL_ACCRUAL:
+            extras["components"] = {
+                "gross": Decimal("1000.00"),
+                "epf_employee": Decimal("110.00"),
+                "epf_employer": Decimal("130.00"),
+                "socso_employee": Decimal("5.00"),
+                "socso_employer": Decimal("17.50"),
+                "eis_employee": Decimal("2.00"),
+                "eis_employer": Decimal("2.00"),
+                "tax": Decimal("15.00"),
+                "other_deductions": Decimal("50.00"),
+                "net": Decimal("818.00"),
+            }
+        elif event_type is EventType.REMIT_STATUTORY:
+            extras["liability_account_code"] = coa.EPF_PAYABLE
+
         legs = build_legs(
             TransactionCreate(
                 event_type=event_type,
@@ -47,11 +66,12 @@ class TestPostingRules:
                 expense_account_code=coa.UTILITIES,
                 interest_amount=Decimal("25.00"),
                 tax_amount=Decimal("0.00"),
+                **extras,
             )
         )
         debits = sum(l.amount for l in legs if l.side is EntrySide.DEBIT)
         credits = sum(l.amount for l in legs if l.side is EntrySide.CREDIT)
-        assert debits == credits == Decimal("500.00") or debits == credits
+        assert debits == credits
         assert len(legs) >= 2
         assert all(leg.amount > 0 for leg in legs)
 

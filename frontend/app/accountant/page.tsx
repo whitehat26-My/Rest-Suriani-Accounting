@@ -31,6 +31,7 @@ import {
   StockWatchlist,
   SuggestionList,
 } from "@/components/accountant/panels";
+import { PayrollPanel } from "@/components/accountant/payroll";
 
 const PERIODS = [
   { id: "week", label: "7 days" },
@@ -40,8 +41,16 @@ const PERIODS = [
   { id: "all", label: "All time" },
 ] as const;
 
+const VIEWS = [
+  { id: "overview", label: "Overview" },
+  { id: "payroll", label: "Payroll" },
+] as const;
+
+type View = (typeof VIEWS)[number]["id"];
+
 export default function AccountantPage() {
   const [period, setPeriod] = useState<string>("month");
+  const [view, setView] = useState<View>("overview");
   const [data, setData] = useState<AccountantDashboard | null>(null);
   const [trail, setTrail] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,8 +74,8 @@ export default function AccountantPage() {
   }, []);
 
   useEffect(() => {
-    void load(period);
-  }, [load, period]);
+    if (view === "overview") void load(period);
+  }, [load, period, view]);
 
   return (
     <main className="theme-accountant relative min-h-screen bg-surface-base">
@@ -78,7 +87,11 @@ export default function AccountantPage() {
 
       <div className="relative">
         <header className="sticky top-0 z-20 border-b border-surface-border bg-surface-base/85 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-4">
+          <div
+            className={`mx-auto flex flex-wrap items-center justify-between gap-4 px-6 py-4 ${
+              view === "payroll" ? "max-w-[1680px]" : "max-w-7xl"
+            }`}
+          >
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accent">
                 Restoran Suriani
@@ -87,6 +100,24 @@ export default function AccountantPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
+              <div role="tablist" aria-label="Section" className="flex rounded-lg border border-surface-border p-1">
+                {VIEWS.map((item) => (
+                  <button
+                    key={item.id}
+                    role="tab"
+                    aria-selected={view === item.id}
+                    onClick={() => setView(item.id)}
+                    className={`rounded-md px-4 py-1.5 text-sm font-semibold transition-colors ${
+                      view === item.id
+                        ? "bg-accent-soft text-ink-primary"
+                        : "text-ink-secondary hover:text-ink-primary"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
               {/* One filter row, above the charts, as the interaction rules ask. */}
               <div
                 role="group"
@@ -119,8 +150,14 @@ export default function AccountantPage() {
           </div>
         </header>
 
-        <div className="mx-auto max-w-7xl px-6 py-8">
-          {error ? (
+        <div
+          className={`mx-auto px-6 py-8 ${
+            view === "payroll" ? "max-w-[1680px]" : "max-w-7xl"
+          }`}
+        >
+          {view === "payroll" ? (
+            <PayrollPanel period={period} />
+          ) : error ? (
             <div className="glass rounded-xl2 border border-status-critical p-8 text-center">
               <p className="text-lg font-semibold text-ink-primary">{error}</p>
               <button

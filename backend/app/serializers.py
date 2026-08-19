@@ -6,11 +6,15 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import Attachment, InventoryItem, Transaction
+from .models import Attachment, InventoryItem, PayrollRun, Payslip, Transaction
 from .schemas import (
     AttachmentOut,
     InventoryItemOut,
     LedgerEntryOut,
+    PayrollRunOut,
+    PayrollRunSummary,
+    PayrollTotals,
+    PayslipOut,
     TransactionOut,
 )
 from .services.ledger import EVENT_DIRECTION, EVENT_FRIENDLY
@@ -113,3 +117,75 @@ def inventory_item_out(
 
 def decimal_or_zero(value: Decimal | None) -> Decimal:
     return value if value is not None else Decimal("0.00")
+
+
+# --------------------------------------------------------------------------- #
+# Payroll
+# --------------------------------------------------------------------------- #
+def payslip_out(payslip: Payslip) -> PayslipOut:
+    return PayslipOut(
+        id=payslip.id,
+        employee_id=payslip.employee_id,
+        employee_name=payslip.employee.name,
+        position=payslip.employee.position,
+        pay_basis=payslip.employee.pay_basis,
+        days_worked=payslip.days_worked,
+        hours_worked=payslip.hours_worked,
+        overtime_hours=payslip.overtime_hours,
+        basic_pay=payslip.basic_pay,
+        overtime_pay=payslip.overtime_pay,
+        allowances=payslip.allowances,
+        bonus=payslip.bonus,
+        gross_pay=payslip.gross_pay,
+        epf_employee=payslip.epf_employee,
+        socso_employee=payslip.socso_employee,
+        eis_employee=payslip.eis_employee,
+        tax_deduction=payslip.tax_deduction,
+        other_deductions=payslip.other_deductions,
+        total_deductions=payslip.total_deductions,
+        epf_employer=payslip.epf_employer,
+        socso_employer=payslip.socso_employer,
+        eis_employer=payslip.eis_employer,
+        employer_contributions=payslip.employer_contributions,
+        employer_cost=payslip.employer_cost,
+        net_pay=payslip.net_pay,
+        note=payslip.note,
+    )
+
+
+def payroll_run_out(run: PayrollRun, *, warnings: list[str] | None = None) -> PayrollRunOut:
+    from .services.payroll import run_totals
+
+    return PayrollRunOut(
+        id=run.id,
+        reference=run.reference,
+        period_start=run.period_start,
+        period_end=run.period_end,
+        pay_date=run.pay_date,
+        status=run.status,
+        notes=run.notes,
+        accrual_transaction_id=run.accrual_transaction_id,
+        payment_transaction_id=run.payment_transaction_id,
+        headcount=len(run.payslips),
+        payslips=[payslip_out(slip) for slip in run.payslips],
+        totals=PayrollTotals(**run_totals(run)),
+        ad_hoc_wage_warnings=warnings or [],
+    )
+
+
+def payroll_run_summary(run: PayrollRun) -> PayrollRunSummary:
+    from .services.payroll import run_totals
+
+    totals = run_totals(run)
+    return PayrollRunSummary(
+        id=run.id,
+        reference=run.reference,
+        period_start=run.period_start,
+        period_end=run.period_end,
+        pay_date=run.pay_date,
+        status=run.status,
+        headcount=len(run.payslips),
+        gross_pay=totals["gross_pay"],
+        employer_cost=totals["employer_cost"],
+        net_pay=totals["net_pay"],
+    )

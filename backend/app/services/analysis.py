@@ -185,7 +185,12 @@ def evaluate(db: Session, start: date, end: date) -> FinancialEvaluationOut:
     revenue = profit_loss.revenue
     food_cost = period_balances.get(coa.COGS, ZERO)
     wastage = period_balances.get(coa.WASTAGE, ZERO)
-    labour = period_balances.get(coa.WAGES, ZERO)
+    # The true cost of staff is gross wages plus what the employer contributes
+    # on top; leaving the contributions out understates labour by roughly 15%.
+    labour = money(
+        period_balances.get(coa.WAGES, ZERO)
+        + period_balances.get(coa.EMPLOYER_STATUTORY, ZERO)
+    )
     rent = period_balances.get(coa.RENT, ZERO)
 
     cash = money(balances.get(coa.CASH_ON_HAND, ZERO) + balances.get(coa.BANK, ZERO))
@@ -260,7 +265,8 @@ def evaluate(db: Session, start: date, end: date) -> FinancialEvaluationOut:
             unit="%",
             rating=_band(labour_pct, good=(0, 35), watch=(35, 42)),
             benchmark="35% of sales or below",
-            explanation="Wages as a share of sales. The 25% - 35% band is typical; "
+            explanation="Wages plus employer EPF and SOCSO, as a share of sales. "
+            "The 25% - 35% band is typical; "
             "below it usually means the owner works unpaid shifts.",
         ),
         MetricOut(

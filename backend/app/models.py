@@ -133,6 +133,10 @@ class EventType(str, enum.Enum):
     STOCK_WASTAGE = "STOCK_WASTAGE"
     STOCK_ADJUSTMENT_GAIN = "STOCK_ADJUSTMENT_GAIN"
 
+    PAYROLL_ACCRUAL = "PAYROLL_ACCRUAL"
+    PAY_NET_WAGES = "PAY_NET_WAGES"
+    REMIT_STATUTORY = "REMIT_STATUTORY"
+
     BANK_DEPOSIT = "BANK_DEPOSIT"
     CASH_WITHDRAWAL = "CASH_WITHDRAWAL"
 
@@ -154,6 +158,32 @@ class TransactionSource(str, enum.Enum):
     RECEIPT_PHOTO = "RECEIPT_PHOTO"
     SYSTEM = "SYSTEM"
     SEED = "SEED"
+
+
+class EmploymentType(str, enum.Enum):
+    PERMANENT = "PERMANENT"
+    PART_TIME = "PART_TIME"
+    CASUAL = "CASUAL"
+
+
+class PayBasis(str, enum.Enum):
+    """How an employee's basic pay is worked out."""
+
+    MONTHLY = "MONTHLY"
+    DAILY = "DAILY"
+    HOURLY = "HOURLY"
+
+
+class PayrollStatus(str, enum.Enum):
+    """A payroll run's lifecycle.
+
+    Only ``APPROVED`` writes to the ledger, so a run can be edited freely while
+    it is still a draft without leaving corrections behind.
+    """
+
+    DRAFT = "DRAFT"
+    APPROVED = "APPROVED"
+    PAID = "PAID"
 
 
 class MovementType(str, enum.Enum):
@@ -501,3 +531,197 @@ class StockCount(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     item: Mapped["InventoryItem"] = relationship()
+
+
+# --------------------------------------------------------------------------- #
+# Payroll
+# --------------------------------------------------------------------------- #
+class Employee(Base):
+    """Someone on the payroll.
+
+    The statutory flags matter more than they look. Malaysian contribution rules
+    differ by age (the EPF rate changes at 60) and by whether the worker is a
+    local or a foreign national (EIS does not apply to foreign workers), so both
+    are stored per employee rather than assumed.
+    """
+
+    __tablename__ = "employees"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    # What the owner actually calls them.
+    nickname: Mapped[str] = mapped_column(String(60), default="")
+    position: Mapped[str] = mapped_column(String(80), default="Kitchen Staff")
+
+    employment_type: Mapped[EmploymentType] = mapped_column(
+        Enum(EmploymentType), default=EmploymentType.PERMANENT
+    )
+    pay_basis: Mapped[PayBasis] = mapped_column(Enum(PayBasis), default=PayBasis.MONTHLY)
+    # Monthly salary, daily rate or hourly rate depending on ``pay_basis``.
+    base_rate: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    # Fixed monthly allowances (meals, transport) paid on top of basic pay.
+    fixed_allowance: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    overtime_rate: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+
+    # Statutory treatment.
+    contributes_statutory: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_local: Mapped[bool] = mapped_column(Boolean, default=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Reference numbers, kept for the payslip and the statutory returns.
+    ic_number: Mapped[str] = mapped_column(String(30), default="")
+    epf_number: Mapped[str] = mapped_column(String(30), default="")
+    socso_number: Mapped[str] = mapped_column(String(30), default="")
+    tax_number: Mapped[str] = mapped_column(String(30), default="")
+    bank_name: Mapped[str] = mapped_column(String(60), default="")
+    bank_account: Mapped[str] = mapped_column(String(40), default="")
+
+    joined_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    left_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    payslips: Mapped[list["Payslip"]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("base_rate >= 0", name="ck_employee_base_rate_non_negative"),
+    )
+
+    def age_at(self, on: date) -> int | None:
+        if self.date_of_birth is None:
+            return None
+        born = self.date_of_birth
+        return on.year - born.year - ((on.month, on.day) < (born.month, born.day))
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return f"<Employee {self.name} {self.position}>"
+
+
+class PayrollRun(Base):
+    """One pay period for the whole team.
+
+    A run stays editable while it is a draft. Approving it posts a single
+    balanced accrual to the ledger; paying it settles the net wages. Statutory
+    money is remitted separately, because in practice KWSP, PERKESO and LHDN are
+    each paid on their own schedule.
+    """
+
+    __tablename__ = "payroll_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reference: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date, index=True)
+    pay_date: Mapped[date] = mapped_column(Date)
+
+    status: Mapped[PayrollStatus] = mapped_column(
+        Enum(PayrollStatus), default=PayrollStatus.DRAFT, index=True
+    )
+
+    accrual_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True
+    )
+    payment_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True
+    )
+
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    payslips: Mapped[list["Payslip"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="Payslip.id"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("period_start", "period_end", name="uq_payroll_run_period"),
+    )
+
+    @property
+    def is_editable(self) -> bool:
+        return self.status is PayrollStatus.DRAFT
+
+    def total(self, field: str) -> Decimal:
+        return sum(
+            (getattr(slip, field) for slip in self.payslips), Decimal("0.00")
+        ).quantize(Decimal("0.01"))
+
+
+class Payslip(Base):
+    """One employee's pay for one run, with every figure kept separately.
+
+    Storing each component rather than only the net means a payslip can be
+    reprinted, audited and explained years later, even if the contribution rates
+    have changed in the meantime.
+    """
+
+    __tablename__ = "payslips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("payroll_runs.id", ondelete="CASCADE"), index=True
+    )
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+
+    # Inputs.
+    days_worked: Mapped[Decimal] = mapped_column(QUANTITY, default=Decimal("0.000"))
+    hours_worked: Mapped[Decimal] = mapped_column(QUANTITY, default=Decimal("0.000"))
+    overtime_hours: Mapped[Decimal] = mapped_column(QUANTITY, default=Decimal("0.000"))
+
+    # Earnings.
+    basic_pay: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    overtime_pay: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    allowances: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    bonus: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    gross_pay: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+
+    # Employee deductions.
+    epf_employee: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    socso_employee: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    eis_employee: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    tax_deduction: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    other_deductions: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+
+    # Employer contributions - a cost to the business, not a deduction.
+    epf_employer: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    socso_employer: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+    eis_employer: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+
+    net_pay: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0.00"))
+
+    note: Mapped[str] = mapped_column(String(255), default="")
+
+    run: Mapped["PayrollRun"] = relationship(back_populates="payslips")
+    employee: Mapped["Employee"] = relationship(back_populates="payslips")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "employee_id", name="uq_payslip_run_employee"),
+    )
+
+    @property
+    def total_deductions(self) -> Decimal:
+        return (
+            self.epf_employee
+            + self.socso_employee
+            + self.eis_employee
+            + self.tax_deduction
+            + self.other_deductions
+        ).quantize(Decimal("0.01"))
+
+    @property
+    def employer_contributions(self) -> Decimal:
+        return (self.epf_employer + self.socso_employer + self.eis_employer).quantize(
+            Decimal("0.01")
+        )
+
+    @property
+    def employer_cost(self) -> Decimal:
+        """What the employee actually costs the restaurant."""
+        return (self.gross_pay + self.employer_contributions).quantize(Decimal("0.01"))

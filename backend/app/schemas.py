@@ -9,11 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .models import (
     AccountType,
     CashFlowSection,
+    EmploymentType,
     EntrySide,
     EventType,
     MovementType,
     NormalBalance,
+    PayBasis,
     PaymentMethod,
+    PayrollStatus,
     TransactionSource,
 )
 
@@ -98,6 +101,12 @@ class TransactionCreate(BaseModel):
     # Inventory linkage for purchase events.
     inventory_item_id: int | None = None
     quantity: Decimal | None = Field(default=None, gt=0)
+
+    # Which liability a REMIT_STATUTORY payment settles.
+    liability_account_code: str | None = None
+    # Named component amounts for multi-leg events such as PAYROLL_ACCRUAL,
+    # where a single headline figure cannot describe the entry.
+    components: dict[str, Decimal] = Field(default_factory=dict)
 
     raw_input: str = ""
     notes: str = ""
@@ -489,3 +498,193 @@ class AccountantDashboardOut(BaseModel):
     revenue_by_day: list[TrendPoint]
     inventory_value: Decimal
     low_stock: list[InventoryItemOut]
+
+
+# --------------------------------------------------------------------------- #
+# Payroll
+# --------------------------------------------------------------------------- #
+class EmployeeBase(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    nickname: str = ""
+    position: str = "Kitchen Staff"
+    employment_type: EmploymentType = EmploymentType.PERMANENT
+    pay_basis: PayBasis = PayBasis.MONTHLY
+    base_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
+    fixed_allowance: Decimal = Field(default=Decimal("0.00"), ge=0)
+    overtime_rate: Decimal = Field(default=Decimal("0.00"), ge=0)
+    contributes_statutory: bool = True
+    is_local: bool = True
+    date_of_birth: date | None = None
+    ic_number: str = ""
+    epf_number: str = ""
+    socso_number: str = ""
+    tax_number: str = ""
+    bank_name: str = ""
+    bank_account: str = ""
+    joined_on: date | None = None
+
+
+class EmployeeCreate(EmployeeBase):
+    pass
+
+
+class EmployeeUpdate(BaseModel):
+    name: str | None = None
+    nickname: str | None = None
+    position: str | None = None
+    employment_type: EmploymentType | None = None
+    pay_basis: PayBasis | None = None
+    base_rate: Decimal | None = Field(default=None, ge=0)
+    fixed_allowance: Decimal | None = Field(default=None, ge=0)
+    overtime_rate: Decimal | None = Field(default=None, ge=0)
+    contributes_statutory: bool | None = None
+    is_local: bool | None = None
+    date_of_birth: date | None = None
+    ic_number: str | None = None
+    epf_number: str | None = None
+    socso_number: str | None = None
+    tax_number: str | None = None
+    bank_name: str | None = None
+    bank_account: str | None = None
+    joined_on: date | None = None
+    left_on: date | None = None
+    is_active: bool | None = None
+
+
+class EmployeeOut(EmployeeBase):
+    model_config = ORM
+
+    id: int
+    left_on: date | None = None
+    is_active: bool
+
+
+class PayslipUpdate(BaseModel):
+    """The only fields a payroll clerk edits; everything else is derived."""
+
+    days_worked: Decimal | None = Field(default=None, ge=0)
+    hours_worked: Decimal | None = Field(default=None, ge=0)
+    overtime_hours: Decimal | None = Field(default=None, ge=0)
+    allowances: Decimal | None = Field(default=None, ge=0)
+    bonus: Decimal | None = Field(default=None, ge=0)
+    tax_deduction: Decimal | None = Field(default=None, ge=0)
+    other_deductions: Decimal | None = Field(default=None, ge=0)
+    note: str | None = None
+
+
+class PayslipOut(BaseModel):
+    model_config = ORM
+
+    id: int
+    employee_id: int
+    employee_name: str
+    position: str
+    pay_basis: PayBasis
+
+    days_worked: Decimal
+    hours_worked: Decimal
+    overtime_hours: Decimal
+
+    basic_pay: Decimal
+    overtime_pay: Decimal
+    allowances: Decimal
+    bonus: Decimal
+    gross_pay: Decimal
+
+    epf_employee: Decimal
+    socso_employee: Decimal
+    eis_employee: Decimal
+    tax_deduction: Decimal
+    other_deductions: Decimal
+    total_deductions: Decimal
+
+    epf_employer: Decimal
+    socso_employer: Decimal
+    eis_employer: Decimal
+    employer_contributions: Decimal
+    employer_cost: Decimal
+
+    net_pay: Decimal
+    note: str
+
+
+class PayrollRunCreate(BaseModel):
+    period_start: date
+    period_end: date
+    pay_date: date | None = None
+    # Pre-fills the days column for anyone paid a daily rate.
+    default_days_worked: Decimal = Field(default=Decimal("26"), ge=0)
+    notes: str = ""
+
+
+class PayrollTotals(BaseModel):
+    basic_pay: Decimal
+    overtime_pay: Decimal
+    allowances: Decimal
+    bonus: Decimal
+    gross_pay: Decimal
+    epf_employee: Decimal
+    epf_employer: Decimal
+    socso_employee: Decimal
+    socso_employer: Decimal
+    eis_employee: Decimal
+    eis_employer: Decimal
+    tax_deduction: Decimal
+    other_deductions: Decimal
+    employee_deductions: Decimal
+    employer_contributions: Decimal
+    employer_cost: Decimal
+    net_pay: Decimal
+
+
+class PayrollRunOut(BaseModel):
+    model_config = ORM
+
+    id: int
+    reference: str
+    period_start: date
+    period_end: date
+    pay_date: date
+    status: PayrollStatus
+    notes: str
+    accrual_transaction_id: int | None
+    payment_transaction_id: int | None
+    headcount: int
+    payslips: list[PayslipOut]
+    totals: PayrollTotals
+    # Cash wage payments recorded outside this run in the same period, which
+    # would otherwise be counted twice.
+    ad_hoc_wage_warnings: list[str] = Field(default_factory=list)
+
+
+class PayrollRunSummary(BaseModel):
+    id: int
+    reference: str
+    period_start: date
+    period_end: date
+    pay_date: date
+    status: PayrollStatus
+    headcount: int
+    gross_pay: Decimal
+    employer_cost: Decimal
+    net_pay: Decimal
+
+
+class StatutoryRemittance(BaseModel):
+    body: str = Field(pattern="^(EPF|SOCSO|EIS|TAX)$")
+    amount: Decimal = Field(gt=0)
+    on: date | None = None
+    method: PaymentMethod = PaymentMethod.BANK
+
+
+class PayrollOverviewOut(BaseModel):
+    """What the payroll panel needs in a single call."""
+
+    runs: list[PayrollRunSummary]
+    current: PayrollRunOut | None
+    employees: list[EmployeeOut]
+    outstanding_statutory: dict[str, Decimal]
+    # Labour cost for the reporting period, straight from the ledger.
+    period_wage_cost: Decimal
+    period_employer_contributions: Decimal
+    rules_label: str

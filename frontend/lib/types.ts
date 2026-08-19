@@ -278,3 +278,141 @@ export interface PreviewLeg {
   amount: string;
   memo: string;
 }
+
+
+// ---------------------------------------------------------------------------
+// Payroll
+// ---------------------------------------------------------------------------
+export type EmploymentType = "PERMANENT" | "PART_TIME" | "CASUAL";
+export type PayBasis = "MONTHLY" | "DAILY" | "HOURLY";
+export type PayrollStatus = "DRAFT" | "APPROVED" | "PAID";
+export type StatutoryBody = "EPF" | "SOCSO" | "EIS" | "TAX";
+
+export interface EmployeeRecord {
+  id: number;
+  name: string;
+  nickname: string;
+  position: string;
+  employment_type: EmploymentType;
+  pay_basis: PayBasis;
+  base_rate: string;
+  fixed_allowance: string;
+  overtime_rate: string;
+  contributes_statutory: boolean;
+  is_local: boolean;
+  date_of_birth: string | null;
+  ic_number: string;
+  epf_number: string;
+  socso_number: string;
+  tax_number: string;
+  bank_name: string;
+  bank_account: string;
+  joined_on: string | null;
+  left_on: string | null;
+  is_active: boolean;
+}
+
+export interface PayslipRow {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  position: string;
+  pay_basis: PayBasis;
+
+  days_worked: string;
+  hours_worked: string;
+  overtime_hours: string;
+
+  basic_pay: string;
+  overtime_pay: string;
+  allowances: string;
+  bonus: string;
+  gross_pay: string;
+
+  epf_employee: string;
+  socso_employee: string;
+  eis_employee: string;
+  tax_deduction: string;
+  other_deductions: string;
+  total_deductions: string;
+
+  epf_employer: string;
+  socso_employer: string;
+  eis_employer: string;
+  employer_contributions: string;
+  employer_cost: string;
+
+  net_pay: string;
+  note: string;
+}
+
+export interface PayrollTotals {
+  basic_pay: string;
+  overtime_pay: string;
+  allowances: string;
+  bonus: string;
+  gross_pay: string;
+  epf_employee: string;
+  epf_employer: string;
+  socso_employee: string;
+  socso_employer: string;
+  eis_employee: string;
+  eis_employer: string;
+  tax_deduction: string;
+  other_deductions: string;
+  employee_deductions: string;
+  employer_contributions: string;
+  employer_cost: string;
+  net_pay: string;
+}
+
+export interface PayrollRun {
+  id: number;
+  reference: string;
+  period_start: string;
+  period_end: string;
+  pay_date: string;
+  status: PayrollStatus;
+  notes: string;
+  accrual_transaction_id: number | null;
+  payment_transaction_id: number | null;
+  headcount: number;
+  payslips: PayslipRow[];
+  totals: PayrollTotals;
+  ad_hoc_wage_warnings: string[];
+}
+
+export interface PayrollRunSummary {
+  id: number;
+  reference: string;
+  period_start: string;
+  period_end: string;
+  pay_date: string;
+  status: PayrollStatus;
+  headcount: number;
+  gross_pay: string;
+  employer_cost: string;
+  net_pay: string;
+}
+
+export interface PayrollOverview {
+  runs: PayrollRunSummary[];
+  current: PayrollRun | null;
+  employees: EmployeeRecord[];
+  outstanding_statutory: Record<string, string>;
+  period_wage_cost: string;
+  period_employer_contributions: string;
+  rules_label: string;
+}
+
+/** The fields a payroll clerk may edit; everything else is derived. */
+export interface PayslipEdit {
+  days_worked?: string;
+  hours_worked?: string;
+  overtime_hours?: string;
+  allowances?: string;
+  bonus?: string;
+  tax_deduction?: string;
+  other_deductions?: string;
+  note?: string;
+}

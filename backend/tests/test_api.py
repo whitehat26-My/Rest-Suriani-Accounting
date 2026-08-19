@@ -338,3 +338,175 @@ class TestReceiptUpload:
         )
         assert response.status_code == 400
         assert "Unsupported file type" in response.json()["detail"]
+
+
+class TestPayrollApi:
+    """The payroll journey over HTTP, as Accountant Mode drives it."""
+
+    @pytest.fixture()
+    def team(self, client) -> list[int]:
+        ids = []
+        for name, basis, rate in (
+            ("Nurul Aina", "MONTHLY", "2400.00"),
+            ("Mohd Faiz", "MONTHLY", "1800.00"),
+        ):
+            response = client.post(
+                "/api/payroll/employees",
+                json={"name": name, "pay_basis": basis, "base_rate": rate},
+            )
+            assert response.status_code == 201
+            ids.append(response.json()["id"])
+        return ids
+
+    def test_employees_can_be_added_and_listed(self, client, team):
+        employees = client.get("/api/payroll/employees").json()
+        assert [e["name"] for e in employees] == ["Mohd Faiz", "Nurul Aina"]
+
+    def test_inactive_staff_are_hidden_by_default(self, client, team):
+        client.patch(f"/api/payroll/employees/{team[0]}", json={"is_active": False})
+        assert len(client.get("/api/payroll/employees").json()) == 1
+        assert len(client.get("/api/payroll/employees?include_inactive=true").json()) == 2
+
+    def test_a_run_opens_as_a_draft_with_a_payslip_each(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+
+        assert run["status"] == "DRAFT"
+        assert run["headcount"] == 2
+        assert run["totals"]["gross_pay"] == "4200.00"
+        # Nothing has been posted yet.
+        assert run["accrual_transaction_id"] is None
+
+    def test_editing_a_payslip_recomputes_the_run_totals(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+        payslip_id = run["payslips"][0]["id"]
+
+        updated = client.patch(
+            f"/api/payroll/payslips/{payslip_id}", json={"bonus": "500.00"}
+        ).json()
+        assert updated["totals"]["gross_pay"] == "4700.00"
+
+    def test_approving_posts_the_accrual_and_keeps_the_books_balanced(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+
+        approved = client.post(f"/api/payroll/runs/{run['id']}/approve").json()
+        assert approved["status"] == "APPROVED"
+        assert approved["accrual_transaction_id"] is not None
+
+        accounts = {a["code"]: a["balance"] for a in client.get("/api/accounts").json()}
+        assert accounts["6000"] == "4200.00"   # Salaries & Wages
+        assert accounts["2300"] == approved["totals"]["net_pay"]  # Net wages payable
+        assert client.get("/api/reports/trial-balance").json()["balanced"] is True
+        assert client.get("/api/reports/balance-sheet").json()["balances"] is True
+
+    def test_an_approved_run_refuses_further_edits(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+        client.post(f"/api/payroll/runs/{run['id']}/approve")
+
+        response = client.patch(
+            f"/api/payroll/payslips/{run['payslips'][0]['id']}", json={"bonus": "10.00"}
+        )
+        assert response.status_code == 400
+        assert "no longer be edited" in response.json()["detail"]
+
+    def test_paying_clears_the_net_wages_liability(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+        client.post(f"/api/payroll/runs/{run['id']}/approve")
+        paid = client.post(f"/api/payroll/runs/{run['id']}/pay").json()
+
+        assert paid["status"] == "PAID"
+        accounts = {a["code"]: a["balance"] for a in client.get("/api/accounts").json()}
+        assert accounts["2300"] == "0.00"
+        # Statutory money is held until it is remitted separately.
+        assert accounts["2310"] != "0.00"
+
+    def test_remitting_settles_a_statutory_payable(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+        client.post(f"/api/payroll/runs/{run['id']}/approve")
+
+        owed = client.get("/api/payroll/overview").json()["outstanding_statutory"]["EPF"]
+        response = client.post(
+            "/api/payroll/remit", json={"body": "EPF", "amount": owed}
+        )
+        assert response.status_code == 201
+        assert client.get("/api/payroll/overview").json()["outstanding_statutory"]["EPF"] == "0.00"
+
+    def test_the_overview_answers_the_whole_panel_in_one_call(self, client, team):
+        client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        )
+        overview = client.get("/api/payroll/overview?period=all").json()
+        assert {"runs", "current", "employees", "outstanding_statutory", "rules_label"} <= set(
+            overview
+        )
+        assert overview["current"]["headcount"] == 2
+        assert len(overview["employees"]) == 2
+
+    def test_cash_wages_recorded_outside_a_run_are_flagged(self, client, team):
+        """Grandma's "Worker Pay" button and a formal run can double-count."""
+        client.post(
+            "/api/transactions",
+            json={
+                "event_type": "PAY_WAGES",
+                "amount": "250.00",
+                "txn_date": "2026-06-14",
+                "description": "Weekend helper",
+            },
+        )
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+        assert len(run["ad_hoc_wage_warnings"]) == 1
+        assert "counted twice" in run["ad_hoc_wage_warnings"][0]
+
+    def test_a_duplicate_period_is_refused(self, client, team):
+        payload = {"period_start": "2026-06-01", "period_end": "2026-06-30"}
+        assert client.post("/api/payroll/runs", json=payload).status_code == 201
+        second = client.post("/api/payroll/runs", json=payload)
+        assert second.status_code == 400
+        assert "already exists" in second.json()["detail"]
+
+    def test_a_run_with_no_staff_is_refused(self, client):
+        response = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        )
+        assert response.status_code == 400
+        assert "no active employees" in response.json()["detail"]
+
+    def test_payroll_shows_up_in_the_profit_statement(self, client, team):
+        run = client.post(
+            "/api/payroll/runs",
+            json={"period_start": "2026-06-01", "period_end": "2026-06-30"},
+        ).json()
+        client.post(f"/api/payroll/runs/{run['id']}/approve")
+
+        report = client.get(
+            "/api/reports/income-statement?start=2026-06-01&end=2026-06-30"
+        ).json()
+        labels = {
+            line["account_code"]: line["amount"]
+            for section in report["sections"]
+            for line in section["lines"]
+        }
+        assert labels["6000"] == "4200.00"
+        assert labels["6010"] == run["totals"]["employer_contributions"]

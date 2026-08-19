@@ -89,6 +89,10 @@ class PostingContext:
     counterparty: str = ""
     extra: dict = field(default_factory=dict)
 
+    def component(self, key: str) -> Decimal:
+        """A named component amount, defaulting to zero when absent."""
+        return money(self.extra.get("components", {}).get(key, ZERO))
+
     @property
     def net_revenue(self) -> Decimal:
         """Sales value excluding any tax collected on behalf of the government."""
@@ -299,6 +303,85 @@ def rule_stock_adjustment_gain(ctx: PostingContext) -> list[Leg]:
     ]
 
 
+def rule_payroll_accrual(ctx: PostingContext) -> list[Leg]:
+    """Recognise a whole payroll run in one balanced entry.
+
+    Three distinct things happen when payroll is approved, and conflating them
+    is the usual source of wrong labour figures:
+
+    * The **gross** pay is the business's wage cost, whether or not it has been
+      handed over yet.
+    * The **employee's** deductions are not a cost - they are the employee's own
+      money, held briefly before being forwarded to KWSP, PERKESO or LHDN.
+    * The **employer's** contributions *are* an extra cost on top of gross, which
+      is why they get their own expense account rather than being buried in
+      wages.
+
+    Nothing is paid here. Everything lands in a payable until the money moves.
+    """
+    get = ctx.component
+    gross = get("gross")
+    if gross <= 0:
+        raise LedgerError("A payroll accrual needs a positive gross pay.")
+
+    epf_employer = get("epf_employer")
+    socso_employer = get("socso_employer")
+    eis_employer = get("eis_employer")
+    employer_total = money(epf_employer + socso_employer + eis_employer)
+
+    legs = [debit(coa.WAGES, gross, ctx.description or "Payroll - gross pay")]
+    if employer_total > 0:
+        legs.append(
+            debit(coa.EMPLOYER_STATUTORY, employer_total, "Employer EPF, SOCSO and EIS")
+        )
+
+    net = get("net")
+    if net > 0:
+        legs.append(credit(coa.NET_WAGES_PAYABLE, net, "Net wages owed to staff"))
+
+    for code, employee_key, employer_key, memo in (
+        (coa.EPF_PAYABLE, "epf_employee", "epf_employer", "EPF payable to KWSP"),
+        (coa.SOCSO_PAYABLE, "socso_employee", "socso_employer", "SOCSO payable to PERKESO"),
+        (coa.EIS_PAYABLE, "eis_employee", "eis_employer", "EIS payable to PERKESO"),
+    ):
+        total = money(get(employee_key) + get(employer_key))
+        if total > 0:
+            legs.append(credit(code, total, memo))
+
+    tax = get("tax")
+    if tax > 0:
+        legs.append(credit(coa.TAX_PAYABLE, tax, "PCB payable to LHDN"))
+
+    # Recovering a staff advance reduces the asset rather than creating income.
+    other = get("other_deductions")
+    if other > 0:
+        legs.append(credit(coa.STAFF_ADVANCES, other, "Staff advance recovered"))
+
+    return legs
+
+
+def rule_pay_net_wages(ctx: PostingContext) -> list[Leg]:
+    """Handing over the take-home pay. The wage cost was recognised at accrual."""
+    return [
+        debit(coa.NET_WAGES_PAYABLE, ctx.amount, ctx.description or "Net wages paid"),
+        credit(ctx.payment_account, ctx.amount, "Paid to staff"),
+    ]
+
+
+def rule_remit_statutory(ctx: PostingContext) -> list[Leg]:
+    """Forwarding withheld contributions to the statutory body."""
+    code = ctx.extra.get("liability_account_code")
+    if code not in STATUTORY_PAYABLES:
+        raise LedgerError(
+            "A statutory remittance must name one of the statutory payable "
+            f"accounts {sorted(STATUTORY_PAYABLES)}."
+        )
+    return [
+        debit(code, ctx.amount, ctx.description or "Statutory contribution remitted"),
+        credit(ctx.payment_account, ctx.amount, "Paid to statutory body"),
+    ]
+
+
 def rule_bank_deposit(ctx: PostingContext) -> list[Leg]:
     """Banking the day's takings. Cash total is unchanged, only its location."""
     return [
@@ -336,6 +419,9 @@ POSTING_RULES: dict[EventType, Callable[[PostingContext], list[Leg]]] = {
     EventType.COGS_USAGE: rule_cogs_usage,
     EventType.STOCK_WASTAGE: rule_stock_wastage,
     EventType.STOCK_ADJUSTMENT_GAIN: rule_stock_adjustment_gain,
+    EventType.PAYROLL_ACCRUAL: rule_payroll_accrual,
+    EventType.PAY_NET_WAGES: rule_pay_net_wages,
+    EventType.REMIT_STATUTORY: rule_remit_statutory,
     EventType.BANK_DEPOSIT: rule_bank_deposit,
     EventType.CASH_WITHDRAWAL: rule_cash_withdrawal,
 }
@@ -363,6 +449,9 @@ EVENT_DIRECTION: dict[EventType, str] = {
     EventType.OPENING_INVENTORY: "neutral",
     EventType.COGS_USAGE: "neutral",
     EventType.STOCK_WASTAGE: "neutral",
+    EventType.PAYROLL_ACCRUAL: "neutral",
+    EventType.PAY_NET_WAGES: "out",
+    EventType.REMIT_STATUTORY: "out",
     EventType.BANK_DEPOSIT: "neutral",
     EventType.CASH_WITHDRAWAL: "neutral",
 }
@@ -378,7 +467,13 @@ SYSTEM_ONLY_EVENTS: frozenset[EventType] = frozenset(
         EventType.STOCK_WASTAGE,
         EventType.STOCK_ADJUSTMENT_GAIN,
         EventType.DEPRECIATION,
+        EventType.PAYROLL_ACCRUAL,
     }
+)
+
+# The only liabilities a statutory remittance is allowed to settle.
+STATUTORY_PAYABLES: frozenset[str] = frozenset(
+    {coa.EPF_PAYABLE, coa.SOCSO_PAYABLE, coa.EIS_PAYABLE, coa.TAX_PAYABLE}
 )
 
 
@@ -405,6 +500,9 @@ EVENT_FRIENDLY: dict[EventType, str] = {
     EventType.COGS_USAGE: "Food used from the store room",
     EventType.STOCK_WASTAGE: "Food thrown away",
     EventType.STOCK_ADJUSTMENT_GAIN: "Found extra stock",
+    EventType.PAYROLL_ACCRUAL: "Worker pay worked out",
+    EventType.PAY_NET_WAGES: "Paid the workers their wages",
+    EventType.REMIT_STATUTORY: "Sent EPF and SOCSO money",
     EventType.BANK_DEPOSIT: "Cash put into the bank",
     EventType.CASH_WITHDRAWAL: "Cash taken from the bank",
 }
@@ -524,7 +622,18 @@ def build_legs(request: TransactionCreate) -> list[Leg]:
         interest_amount=money(request.interest_amount),
         description=request.description,
         counterparty=request.counterparty,
+        extra={
+            "components": {k: money(v) for k, v in request.components.items()},
+            "liability_account_code": request.liability_account_code,
+        },
     )
+
+    if ctx.event_type is EventType.PAYROLL_ACCRUAL:
+        # The headline amount of an accrual is derived from its components, so
+        # the usual tax/fee sanity checks do not apply to it.
+        legs = rule(ctx)
+        _validate(legs)
+        return legs
 
     if ctx.tax_amount > ctx.amount:
         raise LedgerError("Tax cannot be larger than the transaction amount.")

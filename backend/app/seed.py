@@ -9,6 +9,7 @@ statements can be checked against figures a person can follow.
 """
 from __future__ import annotations
 
+import calendar
 import random
 from datetime import date, timedelta
 from decimal import Decimal
@@ -19,20 +20,32 @@ from . import chart_of_accounts as coa
 from .database import init_db, session_scope
 from .models import (
     Account,
+    Employee,
+    EmploymentType,
     EventType,
     InventoryItem,
     MovementType,
+    PayBasis,
     PaymentMethod,
     TransactionSource,
 )
 from .schemas import (
     InventoryItemCreate,
+    PayrollRunCreate,
     StockCountCreate,
     StockCountEntry,
     StockPurchase,
     TransactionCreate,
 )
 from .services.inventory import create_item, purchase_stock, record_stock_count
+from .services.payroll import (
+    approve_run as approve_payroll_run,
+    calculate_payslip,
+    create_run as create_payroll_run,
+    pay_run as pay_payroll_run,
+    remit_statutory,
+    run_totals as payroll_totals,
+)
 from .services.ledger import money, post_transaction
 
 
@@ -78,8 +91,37 @@ DEMO_ITEMS = [
 
 SUPPLIERS = ["Pasar Borong Selayang", "Ayam Segar Sdn Bhd", "Kedai Runcit Pak Mat"]
 
+# A believable small-restaurant team: a couple of permanent staff on statutory
+# contributions, a part-timer, a casual weekend helper paid a daily rate, and a
+# senior cook past 60 so the age-based EPF rule is exercised.
+DEMO_EMPLOYEES = [
+    # name, nickname, position, employment, basis, rate, allowance, local, birth year
+    ("Nurul Aina binti Hassan", "Aina", "Head Cook", "PERMANENT", "MONTHLY", "2400.00", "150.00", True, 1988),
+    ("Mohd Faiz bin Rahman", "Faiz", "Kitchen Assistant", "PERMANENT", "MONTHLY", "1800.00", "100.00", True, 1996),
+    ("Siti Zubaidah binti Omar", "Mak Su", "Cook", "PERMANENT", "MONTHLY", "2000.00", "150.00", True, 1962),
+    ("Tan Wei Ming", "Ah Ming", "Server", "PART_TIME", "MONTHLY", "1500.00", "0.00", True, 2001),
+    ("Rina Sari", "Rina", "Weekend Helper", "CASUAL", "DAILY", "90.00", "0.00", True, 1999),
+]
 
-def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
+
+def _month_end(day: date) -> date:
+    return day.replace(day=calendar.monthrange(day.year, day.month)[1])
+
+
+def _next_month_day(day: date, day_of_month: int) -> date:
+    """The given day of the month after ``day``'s month."""
+    month_index = day.year * 12 + day.month
+    year, month = month_index // 12, month_index % 12 + 1
+    return date(year, month, min(day_of_month, calendar.monthrange(year, month)[1]))
+
+
+def _months_back(day: date, months: int) -> date:
+    """First day of the month ``months`` before ``day``'s month."""
+    month_index = day.year * 12 + (day.month - 1) - months
+    return date(month_index // 12, month_index % 12 + 1, 1)
+
+
+def seed_demo_data(*, months: int = 3, seed: int = 20260819) -> dict:
     """Generate a few months of trading. Safe to run only on an empty ledger.
 
     The figures are modelled on a real independent restaurant rather than picked
@@ -91,9 +133,12 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
     rng = random.Random(seed)
     ensure_chart_of_accounts()
 
-    stats = {"transactions": 0, "items": 0, "days": days}
     today = date.today()
-    start = today - timedelta(days=days - 1)
+    # Start on a month boundary so payroll periods, rent and the monthly
+    # accruals all line up with real calendar months.
+    start = _months_back(today, months - 1)
+    days = (today - start).days + 1
+    stats = {"transactions": 0, "items": 0, "days": days, "payroll_runs": 0}
 
     def post(**kwargs) -> None:
         kwargs.setdefault("source", TransactionSource.SEED)
@@ -136,6 +181,31 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
             counterparty="Restoran Supply Depot",
             payment_method=PaymentMethod.BANK,
         )
+
+        # ------------------------------------------------------------------ #
+        # The team
+        # ------------------------------------------------------------------ #
+        for (
+            name, nickname, position, employment, basis, rate, allowance, local, born
+        ) in DEMO_EMPLOYEES:
+            db.add(
+                Employee(
+                    name=name,
+                    nickname=nickname,
+                    position=position,
+                    employment_type=EmploymentType(employment),
+                    pay_basis=PayBasis(basis),
+                    base_rate=Decimal(rate),
+                    fixed_allowance=Decimal(allowance),
+                    # Casual helpers are paid from the till and are below the
+                    # threshold where contributions are worth administering.
+                    contributes_statutory=employment != "CASUAL",
+                    is_local=local,
+                    date_of_birth=date(born, 6, 15),
+                    joined_on=start,
+                )
+            )
+        db.flush()
 
         # ------------------------------------------------------------------ #
         # Stock items, opened at roughly two-thirds of their par level
@@ -330,10 +400,6 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
                     (Decimal("400.00"), coa.TRANSPORT, "Petrol and delivery",
                      EventType.EXPENSE_CASH),
                 ],
-                7: [
-                    (Decimal("4800.00"), coa.WAGES, "Staff wages (first half)",
-                     EventType.PAY_WAGES),
-                ],
                 12: [
                     (Decimal("1300.00"), coa.UTILITIES, "Electricity, water and gas",
                      EventType.EXPENSE_CASH),
@@ -343,10 +409,6 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
                 18: [
                     (Decimal("700.00"), coa.SUPPLIES, "Packaging and cleaning",
                      EventType.EXPENSE_CASH),
-                ],
-                22: [
-                    (Decimal("4800.00"), coa.WAGES, "Staff wages (second half)",
-                     EventType.PAY_WAGES),
                 ],
             }
 
@@ -402,6 +464,60 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
                 )
 
             day += timedelta(days=1)
+
+        # ------------------------------------------------------------------ #
+        # Payroll, one run per calendar month
+        #
+        # Completed months are approved and paid. The current month is approved
+        # but left unpaid, which is exactly where a restaurant sits mid-month:
+        # the wage cost is recognised, the money has not gone out yet.
+        # ------------------------------------------------------------------ #
+        period_start = start
+        while period_start <= today:
+            month_end = _month_end(period_start)
+            completed = month_end < today
+            # A run for the current month covers only the days worked so far,
+            # so the wage cost lines up with the revenue earned against it.
+            last_day = month_end if completed else today
+            run = create_payroll_run(
+                db,
+                PayrollRunCreate(
+                    period_start=period_start,
+                    period_end=last_day,
+                    pay_date=last_day,
+                    notes="Monthly payroll" if completed else "Month to date",
+                ),
+            )
+            # A few overtime hours make the payslips look like real ones.
+            for slip in run.payslips:
+                if slip.employee.pay_basis is PayBasis.DAILY:
+                    slip.days_worked = Decimal(str(rng.randint(7, 10)))
+                else:
+                    slip.overtime_hours = Decimal(str(rng.choice([0, 0, 4, 6, 8, 12])))
+                calculate_payslip(slip, slip.employee, pay_date=run.pay_date)
+            db.flush()
+
+            approve_payroll_run(db, run)
+            stats["transactions"] += 1
+            stats["payroll_runs"] += 1
+
+            if completed:
+                pay_payroll_run(db, run, method=PaymentMethod.BANK)
+                stats["transactions"] += 1
+                # Statutory money is remitted the following month, by the 15th.
+                totals = payroll_totals(run)
+                remit_on = min(_next_month_day(month_end, 15), today)
+                if remit_on > month_end:
+                    for body, amount in (
+                        ("EPF", totals["epf_employee"] + totals["epf_employer"]),
+                        ("SOCSO", totals["socso_employee"] + totals["socso_employer"]),
+                        ("EIS", totals["eis_employee"] + totals["eis_employer"]),
+                    ):
+                        if amount > 0:
+                            remit_statutory(db, body, amount, on=remit_on)
+                            stats["transactions"] += 1
+
+            period_start = month_end + timedelta(days=1)
 
     return stats
 

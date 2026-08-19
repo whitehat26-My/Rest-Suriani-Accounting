@@ -12,6 +12,11 @@ import type {
   PreviewLeg,
   SpendingCategory,
   StockCountResult,
+  EmployeeRecord,
+  PayrollOverview,
+  PayrollRun,
+  PayrollRunSummary,
+  PayslipEdit,
   Transaction,
   TrendPoint,
   VoiceParseResult,
@@ -148,4 +153,50 @@ export const api = {
 
   previewEntries: (payload: Record<string, unknown>) =>
     post<PreviewLeg[]>("/api/transactions/preview", payload),
+
+  // -------------------------------------------------------------------------
+  // Payroll
+  // -------------------------------------------------------------------------
+  payrollOverview: (period = "month") =>
+    request<PayrollOverview>(`/api/payroll/overview?period=${period}`),
+
+  payrollRuns: () => request<PayrollRunSummary[]>("/api/payroll/runs"),
+
+  payrollRun: (id: number) => request<PayrollRun>(`/api/payroll/runs/${id}`),
+
+  createPayrollRun: (payload: {
+    period_start: string;
+    period_end: string;
+    pay_date?: string;
+    default_days_worked?: string;
+    notes?: string;
+  }) => post<PayrollRun>("/api/payroll/runs", payload),
+
+  updatePayslip: (payslipId: number, payload: PayslipEdit) =>
+    request<PayrollRun>(`/api/payroll/payslips/${payslipId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  approvePayrollRun: (id: number) => post<PayrollRun>(`/api/payroll/runs/${id}/approve`),
+
+  payPayrollRun: (id: number, method = "BANK") =>
+    post<PayrollRun>(`/api/payroll/runs/${id}/pay?method=${method}`),
+
+  remitStatutory: (body: string, amount: string) =>
+    post<Transaction>("/api/payroll/remit", { body, amount }),
+
+  employees: (includeInactive = false) =>
+    request<EmployeeRecord[]>(
+      `/api/payroll/employees${includeInactive ? "?include_inactive=true" : ""}`,
+    ),
+
+  createEmployee: (payload: Record<string, unknown>) =>
+    post<EmployeeRecord>("/api/payroll/employees", payload),
+
+  updateEmployee: (id: number, payload: Record<string, unknown>) =>
+    request<EmployeeRecord>(`/api/payroll/employees/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 };
