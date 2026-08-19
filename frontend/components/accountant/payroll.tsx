@@ -306,10 +306,31 @@ function RunPanel({
             {shortDate(run.period_start)} — {shortDate(run.period_end)} · paid{" "}
             {shortDate(run.pay_date)} · {run.headcount} staff
           </p>
-          <p className="mt-1 text-xs text-ink-muted">{status.hint}</p>
+          <p className="mt-1 text-xs text-ink-muted">
+            {status.hint}
+            {run.status === "DRAFT"
+              ? " Anything printed now is stamped DRAFT."
+              : ""}
+          </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/api/payroll/runs/${run.id}/payslips.pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-surface-border px-4 py-2 text-sm font-medium text-ink-secondary transition-colors hover:text-ink-primary"
+          >
+            Print payslips
+          </a>
+          <a
+            href={`/api/payroll/runs/${run.id}/summary.pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-surface-border px-4 py-2 text-sm font-medium text-ink-secondary transition-colors hover:text-ink-primary"
+          >
+            Print summary
+          </a>
           {run.status === "DRAFT" ? (
             <button
               type="button"
@@ -373,7 +394,7 @@ function PayslipTable({
 }) {
   return (
     <div className="mt-5 overflow-x-auto">
-      <table className="w-full min-w-[1240px] text-sm">
+      <table className="w-full min-w-[1320px] text-sm">
         <thead>
           <tr className="border-b border-surface-border text-xs uppercase tracking-wider text-ink-muted">
             <th scope="col" className="py-2 pr-3 text-left font-medium">Employee</th>
@@ -389,7 +410,10 @@ function PayslipTable({
             <th scope="col" className="px-2 py-2 text-right font-medium">EIS</th>
             <th scope="col" className="px-2 py-2 text-right font-medium">Other</th>
             <th scope="col" className="px-2 py-2 text-right font-medium">Net pay</th>
-            <th scope="col" className="py-2 pl-2 text-right font-medium">Cost to us</th>
+            <th scope="col" className="px-2 py-2 text-right font-medium">Cost to us</th>
+            <th scope="col" className="py-2 pl-2 text-right font-medium">
+              <span className="sr-only">Print</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -480,6 +504,17 @@ function PayslipTableRow({
       />
       <MoneyCell value={slip.net_pay} strong />
       <MoneyCell value={slip.employer_cost} />
+      <td className="py-2 pl-2 text-right">
+        <a
+          href={`/api/payroll/payslips/${slip.id}.pdf`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Payslip for ${slip.employee_name}`}
+          className="rounded-md px-2 py-1 text-xs font-medium text-accent hover:bg-accent-soft"
+        >
+          Payslip
+        </a>
+      </td>
     </tr>
   );
 }

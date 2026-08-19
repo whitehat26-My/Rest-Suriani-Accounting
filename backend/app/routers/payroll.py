@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -25,6 +26,7 @@ from ..schemas import (
 )
 from ..serializers import payroll_run_out, payroll_run_summary, transaction_out
 from ..services import payroll as payroll_service
+from ..services import payroll_pdf
 from ..services.ledger import LedgerError, account_balances, load_transaction
 from ..services.payroll import PayrollError
 from ..services.payroll_rules import ACTIVE_RULES
@@ -233,4 +235,74 @@ def overview(
             coa.EMPLOYER_STATUTORY, Decimal("0.00")
         ),
         rules_label=ACTIVE_RULES.label,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Printable documents
+# --------------------------------------------------------------------------- #
+def _pdf_response(content: bytes, filename: str) -> Response:
+    """Send a PDF inline, so it opens in the browser's viewer ready to print."""
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(len(content)),
+        },
+    )
+
+
+def _require_run(db: Session, run_id: int) -> PayrollRun:
+    run = payroll_service.load_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Payroll run not found")
+    return run
+
+
+@router.get("/runs/{run_id}/summary.pdf")
+def run_summary_pdf(run_id: int, db: Session = Depends(get_db)) -> Response:
+    """The whole run on one landscape page, for the owner's records."""
+    run = _require_run(db, run_id)
+    return _pdf_response(
+        payroll_pdf.summary_pdf(run), f"payroll-summary-{run.reference}.pdf"
+    )
+
+
+@router.get("/runs/{run_id}/payslips.pdf")
+def run_payslips_pdf(run_id: int, db: Session = Depends(get_db)) -> Response:
+    """Every payslip in the run, one page each, ready to print and hand out."""
+    run = _require_run(db, run_id)
+    if not run.payslips:
+        raise HTTPException(status_code=400, detail="This run has no payslips.")
+    ytd = {
+        slip.employee_id: payroll_service.year_to_date(
+            db, slip.employee_id, run.period_end
+        )
+        for slip in run.payslips
+    }
+    return _pdf_response(
+        payroll_pdf.payslips_pdf(run, ytd_by_employee=ytd),
+        f"payslips-{run.reference}.pdf",
+    )
+
+
+@router.get("/payslips/{payslip_id}.pdf")
+def single_payslip_pdf(payslip_id: int, db: Session = Depends(get_db)) -> Response:
+    """One person's payslip."""
+    payslip = db.get(Payslip, payslip_id)
+    if payslip is None:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    run = _require_run(db, payslip.run_id)
+    safe_name = "".join(
+        ch for ch in payslip.employee.name.replace(" ", "-") if ch.isalnum() or ch == "-"
+    )
+    ytd = {
+        payslip.employee_id: payroll_service.year_to_date(
+            db, payslip.employee_id, run.period_end
+        )
+    }
+    return _pdf_response(
+        payroll_pdf.payslips_pdf(run, [payslip], ytd_by_employee=ytd),
+        f"payslip-{run.reference}-{safe_name}.pdf",
     )

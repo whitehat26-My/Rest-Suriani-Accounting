@@ -303,6 +303,36 @@ def run_totals(run: PayrollRun) -> dict[str, Decimal]:
     return totals
 
 
+def year_to_date(db: Session, employee_id: int, upto: date) -> dict[str, Decimal]:
+    """An employee's totals for the calendar year, up to and including a run.
+
+    Only approved runs count. A draft is not yet a fact about the year, and
+    including one would make the same payslip print different figures depending
+    on whether someone happened to be editing next month at the time.
+    """
+    rows = db.execute(
+        select(
+            func.coalesce(func.sum(Payslip.gross_pay), 0),
+            func.coalesce(func.sum(Payslip.epf_employee), 0),
+            func.coalesce(func.sum(Payslip.socso_employee), 0),
+            func.coalesce(func.sum(Payslip.eis_employee), 0),
+            func.coalesce(func.sum(Payslip.tax_deduction), 0),
+            func.coalesce(func.sum(Payslip.net_pay), 0),
+            func.coalesce(func.sum(Payslip.epf_employer), 0),
+        )
+        .join(PayrollRun, Payslip.run_id == PayrollRun.id)
+        .where(
+            Payslip.employee_id == employee_id,
+            PayrollRun.status != PayrollStatus.DRAFT,
+            PayrollRun.period_end >= date(upto.year, 1, 1),
+            PayrollRun.period_end <= upto,
+        )
+    ).one()
+
+    keys = ("gross", "epf", "socso", "eis", "tax", "net", "epf_employer")
+    return {key: money(value) for key, value in zip(keys, rows)}
+
+
 def ad_hoc_wage_payments(db: Session, run: PayrollRun) -> list[Transaction]:
     """Cash wage payments recorded outside this run, in the same period.
 

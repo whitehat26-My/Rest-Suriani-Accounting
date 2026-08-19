@@ -26,9 +26,12 @@ export default function RoleChooser() {
           transition={{ duration: 0.5 }}
           className="mb-14 text-center"
         >
-          <p className="mb-3 text-sm font-semibold uppercase tracking-[0.35em] text-accent">
-            Restoran Suriani
-          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/logo-mark.png"
+            alt="Restoran Suriani"
+            className="mx-auto mb-6 h-16 w-auto sm:h-20"
+          />
           <h1 className="text-4xl font-bold tracking-tight text-ink-primary sm:text-6xl">
             Who is using the system?
           </h1>

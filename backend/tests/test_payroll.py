@@ -450,3 +450,179 @@ class TestTotalsAndIntegrity:
         )
         run = make_run(db)
         assert ad_hoc_wage_payments(db, run) == []
+
+
+# --------------------------------------------------------------------------- #
+# Printable documents
+# --------------------------------------------------------------------------- #
+class TestYearToDate:
+    def test_it_totals_approved_runs_only(self, db):
+        """A draft is not yet a fact about the year."""
+        from app.services.payroll import year_to_date
+
+        add_employee(db)
+        june = make_run(db, date(2026, 6, 1), date(2026, 6, 30))
+        approve_run(db, june)
+        db.commit()
+
+        july = make_run(db, date(2026, 7, 1), date(2026, 7, 31))
+        db.commit()
+        assert july.status is PayrollStatus.DRAFT
+
+        employee_id = june.payslips[0].employee_id
+        totals = year_to_date(db, employee_id, date(2026, 7, 31))
+        # Only June counts, even though July's draft exists.
+        assert totals["gross"] == Decimal("2000.00")
+        assert totals["net"] == Decimal("1766.00")
+
+        approve_run(db, july)
+        db.commit()
+        assert year_to_date(db, employee_id, date(2026, 7, 31))["gross"] == Decimal("4000.00")
+
+    def test_it_stops_at_the_run_being_printed(self, db):
+        """Reprinting June's payslip must not show July's figures."""
+        from app.services.payroll import year_to_date
+
+        add_employee(db)
+        for start, end in ((date(2026, 6, 1), date(2026, 6, 30)),
+                           (date(2026, 7, 1), date(2026, 7, 31))):
+            run = make_run(db, start, end)
+            approve_run(db, run)
+            db.commit()
+
+        employee_id = run.payslips[0].employee_id
+        assert year_to_date(db, employee_id, date(2026, 6, 30))["gross"] == Decimal("2000.00")
+
+    def test_a_previous_year_does_not_leak_in(self, db):
+        from app.services.payroll import year_to_date
+
+        add_employee(db)
+        old = make_run(db, date(2025, 12, 1), date(2025, 12, 31))
+        approve_run(db, old)
+        db.commit()
+        new = make_run(db, date(2026, 1, 1), date(2026, 1, 31))
+        approve_run(db, new)
+        db.commit()
+
+        employee_id = new.payslips[0].employee_id
+        assert year_to_date(db, employee_id, date(2026, 1, 31))["gross"] == Decimal("2000.00")
+
+
+class TestPayrollDocuments:
+    """The PDFs are checked by reading their text back, not by eyeballing them."""
+
+    @staticmethod
+    def text_of(pdf_bytes: bytes) -> str:
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "doc.pdf"
+            path.write_bytes(pdf_bytes)
+            result = subprocess.run(
+                ["pdftotext", "-layout", str(path), "-"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        return result.stdout
+
+    @pytest.fixture()
+    def approved_run(self, db):
+        add_employee(
+            db,
+            name="Nurul Aina",
+            base_rate=Decimal("2400.00"),
+            ic_number="880615-10-5522",
+            epf_number="12345678",
+            bank_name="Maybank",
+            bank_account="5140 2233 4455",
+        )
+        add_employee(db, name="Mohd Faiz", base_rate=Decimal("1800.00"))
+        run = make_run(db)
+        approve_run(db, run)
+        db.commit()
+        return run
+
+    def test_a_payslip_carries_the_figures_the_reader_needs(self, db, approved_run):
+        from app.services.payroll_pdf import payslips_pdf
+
+        slip = next(s for s in approved_run.payslips if s.employee.name == "Nurul Aina")
+        text = self.text_of(payslips_pdf(approved_run, [slip]))
+
+        assert slip.employee.name in text
+        assert "PAYSLIP" in text
+        assert "NET PAY" in text
+        assert f"RM{slip.net_pay:,.2f}" in text
+        assert f"RM{slip.gross_pay:,.2f}" in text
+        # The reference numbers an employee checks against their own records.
+        assert "880615-10-5522" in text
+        assert "Maybank" in text
+
+    def test_a_payslip_says_employer_contributions_are_not_deductions(self, db, approved_run):
+        """The most commonly misread line on a Malaysian payslip."""
+        from app.services.payroll_pdf import payslips_pdf
+
+        text = self.text_of(payslips_pdf(approved_run, [approved_run.payslips[0]]))
+        assert "PAID BY THE RESTAURANT FOR YOU" in text
+        assert "not taken out of your pay" in text
+
+    def test_one_page_per_employee(self, db, approved_run):
+        from pypdf import PdfReader
+        import io
+
+        from app.services.payroll_pdf import payslips_pdf
+
+        reader = PdfReader(io.BytesIO(payslips_pdf(approved_run)))
+        assert len(reader.pages) == len(approved_run.payslips) == 2
+
+    def test_a_draft_is_stamped_so_it_cannot_be_handed_out_by_mistake(self, db):
+        from app.services.payroll_pdf import payslips_pdf, summary_pdf
+
+        add_employee(db)
+        run = make_run(db)
+        assert run.status is PayrollStatus.DRAFT
+
+        # The diagonal wash is what the eye catches, but rotated text does not
+        # survive extraction, so the horizontal banner is what gets asserted -
+        # and it is also what survives a greyscale printer.
+        assert "NOT YET APPROVED" in self.text_of(payslips_pdf(run))
+        assert "NOT FOR ISSUE" in self.text_of(payslips_pdf(run))
+        assert "NOT YET APPROVED" in self.text_of(summary_pdf(run))
+
+    def test_an_approved_document_carries_no_stamp(self, db, approved_run):
+        from app.services.payroll_pdf import payslips_pdf
+
+        assert "NOT YET APPROVED" not in self.text_of(payslips_pdf(approved_run))
+
+    def test_the_summary_lists_everyone_with_totals_and_bank_details(self, db, approved_run):
+        from app.services.payroll_pdf import summary_pdf
+
+        text = self.text_of(summary_pdf(approved_run))
+        totals = run_totals(approved_run)
+
+        for slip in approved_run.payslips:
+            assert slip.employee.name in text
+        assert "TOTAL" in text
+        assert f"RM{totals['gross_pay']:,.2f}" in text
+        assert f"RM{totals['net_pay']:,.2f}" in text
+        # The account the transfer is keyed from must never be clipped.
+        assert "5140 2233 4455" in text
+
+    def test_the_summary_shows_what_is_owed_to_each_body(self, db, approved_run):
+        from app.services.payroll_pdf import summary_pdf
+
+        text = self.text_of(summary_pdf(approved_run))
+        assert "TO REMIT FROM THIS RUN" in text
+        for body in ("KWSP", "PERKESO", "LHDN"):
+            assert body in text
+
+    def test_the_year_to_date_block_appears_when_supplied(self, db, approved_run):
+        from app.services.payroll import year_to_date
+        from app.services.payroll_pdf import payslips_pdf
+
+        slip = approved_run.payslips[0]
+        ytd = {slip.employee_id: year_to_date(db, slip.employee_id, approved_run.period_end)}
+        text = self.text_of(payslips_pdf(approved_run, [slip], ytd_by_employee=ytd))
+        assert "YEAR TO DATE" in text

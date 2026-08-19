@@ -103,20 +103,23 @@ export default function OwnerPage() {
     <main className="theme-owner min-h-screen bg-surface-base pb-16">
       <header className="border-b-4 border-surface-border bg-surface-raised">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-5 py-4">
-          <div className="flex items-center gap-3">
-            <span className="text-4xl" aria-hidden="true">
-              🍜
-            </span>
-            <div>
-              <p className="text-2xl font-bold leading-tight text-ink-primary">
-                Restoran Suriani
-              </p>
-              <p className="text-lg text-ink-secondary">Daily money book</p>
-            </div>
+          <div className="flex min-w-0 items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/logo.png"
+              alt="Restoran Suriani"
+              className="h-12 w-auto rounded-lg sm:h-14"
+            />
+            {/* The logo already says whose book this is, so on a phone the
+                subtitle gives up its space to the button rather than wrapping
+                onto three lines. */}
+            <p className="hidden text-lg font-semibold text-ink-secondary sm:block sm:text-xl">
+              Daily money book
+            </p>
           </div>
           <Link
             href="/accountant"
-            className="min-h-[3.5rem] rounded-xl border-4 border-surface-border px-5 py-2 text-lg font-bold text-ink-secondary"
+            className="min-h-[3.5rem] shrink-0 whitespace-nowrap rounded-xl border-4 border-surface-border px-5 py-2 text-lg font-bold text-ink-secondary"
           >
             Accounts
           </Link>

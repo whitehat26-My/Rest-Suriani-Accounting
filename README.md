@@ -61,7 +61,7 @@ single origin and there is no CORS preflight in development.
 
 ```bash
 cd backend && source .venv/bin/activate
-pytest                              # 249 tests
+pytest                              # 260 tests
 ```
 
 ```bash
@@ -100,6 +100,8 @@ Rest-Suriani-Accounting/
 │   │   ├── seed.py                  Chart bootstrap + 90 days of demo trading
 │   │   ├── utils.py                 Reporting-period helpers
 │   │   ├── security.py              PIN hashing and signed session tokens
+│   │   ├── branding.py              Brand colours and logo paths
+│   │   ├── assets/                  Logo artwork used on printed documents
 │   │   ├── dependencies.py          The access gates
 │   │   ├── services/
 │   │   │   ├── ledger.py            ── STEP 2a: the smart posting engine
@@ -107,6 +109,7 @@ Rest-Suriani-Accounting/
 │   │   │   ├── inventory.py         Weighted-average costing, COGS, stock counts
 │   │   │   ├── payroll.py           Runs, payslips, accrual and payment
 │   │   │   ├── payroll_rules.py     EPF, SOCSO and EIS rates in one place
+│   │   │   ├── payroll_pdf.py       Printable payslips and run summary
 │   │   │   ├── auth.py              Google sign-in, roles, the PIN gate
 │   │   │   ├── analysis.py          Ratios, benchmarks, plain-language advice
 │   │   │   └── nlp.py               Voice/text sentence parser (EN + Malay)
@@ -148,6 +151,7 @@ Rest-Suriani-Accounting/
     │   │   └── payroll.tsx          Runs, payslips, statutory remittances
     │   └── auth/
     │       └── PinGate.tsx          The Accountant Mode PIN keypad
+    ├── public/brand/                Logo artwork used in the app
     ├── lib/{api,types,format}.ts    Typed client, response types, formatting
     ├── tailwind.config.ts
     └── next.config.mjs
@@ -304,6 +308,35 @@ run the books and see the true cost of labour; check the figures against the
 official schedule before filing a statutory return. The payroll screen says so
 too.
 
+### Printing
+
+Two documents, because two different people need them.
+
+**Payslips** - one A4 page each, on the restaurant's letterhead, ready to print
+and hand out. Earnings and deductions sit side by side, net pay is in the same
+place on every page so it can be found at a glance across a stack, and there is
+a year-to-date strip for anyone applying for a loan or checking their own EPF
+statement. It also states plainly that the employer's EPF and SOCSO are paid
+*on top* rather than deducted, which is the most commonly misread line on a
+Malaysian payslip. A signature line at the foot records that cash wages were
+actually handed over.
+
+**The run summary** - one landscape page with every payslip on it, the totals,
+what is owed to each statutory body, bank account numbers for making the
+transfers, and signature lines for prepared-by and approved-by.
+
+A run that has not been approved is stamped `DRAFT` diagonally *and* carries a
+horizontal `NOT YET APPROVED - NOT FOR ISSUE` banner. Two marks rather than one,
+because a diagonal wash can disappear on a greyscale office printer.
+
+| Endpoint | Document |
+| --- | --- |
+| `/api/payroll/runs/{id}/payslips.pdf` | Every payslip in the run |
+| `/api/payroll/payslips/{id}.pdf` | One person's payslip |
+| `/api/payroll/runs/{id}/summary.pdf` | The run summary |
+
+They open inline in the browser's PDF viewer, so **Print** is one keystroke away.
+
 ### Two things worth knowing
 
 - A monthly salary **prorates** over a partial period. The same calculation
@@ -362,6 +395,35 @@ endpoint is open**. That is a deliberate trade: an unconfigured install that
 refused every request would be unusable rather than secure. It is fine on a
 laptop, and the backend logs a warning at startup. Set the credentials before
 putting it anywhere other people can reach.
+
+---
+
+## Branding
+
+The restaurant's own wordmark is the identity throughout - the app headers, the
+sign-in screen, and the letterhead on every printed document.
+
+Colours were sampled from the artwork rather than guessed, so the print
+letterhead and the screen are the same maroon:
+
+| Role | Value |
+| --- | --- |
+| Maroon | `#431215` |
+| Gold | `#E0BB48` |
+| Cream | `#F4D18D` |
+
+Three files are generated from the supplied artwork and live in
+`backend/app/assets/` and `frontend/public/brand/`:
+
+- `logo-mark.png` - background removed, for placing on the maroon band and on
+  dark screens. The original JPEG's background carried compression noise at its
+  edges, which showed as a visible box wherever it was drawn on a coloured
+  surface; lifting the mark off its background removes the seam at any size.
+- `logo.png` - the mark on its maroon block, for light backgrounds such as the
+  daily screen header.
+
+To use different artwork, replace those two files and update the three colours
+in `backend/app/branding.py` and `frontend/app/globals.css`.
 
 ---
 
@@ -447,7 +509,7 @@ Then `python -m app.seed` as before. For production, put a migration tool
 
 ## Testing
 
-249 tests, covering the things that must never break:
+260 tests, covering the things that must never break:
 
 | File | Covers |
 | --- | --- |
@@ -455,6 +517,6 @@ Then `python -m app.seed` as before. For production, put a migration tool
 | `test_statements.py` | Assets = Liabilities + Equity; cash flows reconcile; drawings stay out of profit; interest sits below operating profit |
 | `test_inventory.py` | Weighted-average costing; stock counts post to COGS or wastage; depletion bands |
 | `test_nlp.py` | Parsing across both languages; a quantity is never mistaken for a price |
-| `test_payroll.py` | Contribution rules across age and nationality, proration, the run lifecycle, and the ledger entries it produces |
+| `test_payroll.py` | Contribution rules across age and nationality, proration, the run lifecycle, the ledger entries it produces, and the printed documents (read back with `pdftotext`) |
 | `test_auth.py` | Every gate, role assignment, the PIN and its lockout, and token forgery |
 | `test_api.py` | The complete owner journey and accountant journey over HTTP |

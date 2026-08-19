@@ -47,13 +47,13 @@ function SignInBody() {
         transition={{ duration: 0.5 }}
         className="glass relative w-full max-w-md rounded-xl3 border border-surface-border p-10 text-center"
       >
-        <span className="text-5xl" aria-hidden="true">
-          🍜
-        </span>
-        <p className="mt-4 text-sm font-semibold uppercase tracking-[0.3em] text-accent">
-          Restoran Suriani
-        </p>
-        <h1 className="mt-2 text-3xl font-bold text-ink-primary">Sign in</h1>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/logo-mark.png"
+          alt="Restoran Suriani"
+          className="mx-auto h-14 w-auto"
+        />
+        <h1 className="mt-6 text-3xl font-bold text-ink-primary">Sign in</h1>
         <p className="mx-auto mt-4 max-w-sm text-base leading-relaxed text-ink-secondary">
           Use your Google account. You will stay signed in on this device, so you
           only have to do this once.

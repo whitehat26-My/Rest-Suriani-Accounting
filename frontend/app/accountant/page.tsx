@@ -140,11 +140,17 @@ export default function AccountantPage() {
               view === "payroll" ? "max-w-[1680px]" : "max-w-7xl"
             }`}
           >
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-accent">
-                Restoran Suriani
-              </p>
-              <h1 className="text-2xl font-bold text-ink-primary">Financial Management</h1>
+            <div className="flex items-center gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/logo-mark.png"
+                alt="Restoran Suriani"
+                className="h-9 w-auto"
+              />
+              <span className="h-9 w-px bg-surface-border" aria-hidden="true" />
+              <h1 className="text-xl font-bold text-ink-primary sm:text-2xl">
+                Financial Management
+              </h1>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">

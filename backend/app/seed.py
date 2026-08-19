@@ -95,12 +95,18 @@ SUPPLIERS = ["Pasar Borong Selayang", "Ayam Segar Sdn Bhd", "Kedai Runcit Pak Ma
 # contributions, a part-timer, a casual weekend helper paid a daily rate, and a
 # senior cook past 60 so the age-based EPF rule is exercised.
 DEMO_EMPLOYEES = [
-    # name, nickname, position, employment, basis, rate, allowance, local, birth year
-    ("Nurul Aina binti Hassan", "Aina", "Head Cook", "PERMANENT", "MONTHLY", "2400.00", "150.00", True, 1988),
-    ("Mohd Faiz bin Rahman", "Faiz", "Kitchen Assistant", "PERMANENT", "MONTHLY", "1800.00", "100.00", True, 1996),
-    ("Siti Zubaidah binti Omar", "Mak Su", "Cook", "PERMANENT", "MONTHLY", "2000.00", "150.00", True, 1962),
-    ("Tan Wei Ming", "Ah Ming", "Server", "PART_TIME", "MONTHLY", "1500.00", "0.00", True, 2001),
-    ("Rina Sari", "Rina", "Weekend Helper", "CASUAL", "DAILY", "90.00", "0.00", True, 1999),
+    # name, nickname, position, employment, basis, rate, allowance, local, birth
+    # year, IC, EPF no., SOCSO no., bank, account
+    ("Nurul Aina binti Hassan", "Aina", "Head Cook", "PERMANENT", "MONTHLY", "2400.00", "150.00", True, 1988,
+     "880615-10-5522", "12345678", "A1234567", "Maybank", "5140 2233 4455"),
+    ("Mohd Faiz bin Rahman", "Faiz", "Kitchen Assistant", "PERMANENT", "MONTHLY", "1800.00", "100.00", True, 1996,
+     "960615-08-5133", "23456789", "A2345678", "CIMB Bank", "7009 1122 3344"),
+    ("Siti Zubaidah binti Omar", "Mak Su", "Cook", "PERMANENT", "MONTHLY", "2000.00", "150.00", True, 1962,
+     "620615-02-5044", "34567890", "A3456789", "Bank Islam", "1201 4455 6677"),
+    ("Tan Wei Ming", "Ah Ming", "Server", "PART_TIME", "MONTHLY", "1500.00", "0.00", True, 2001,
+     "010615-14-5877", "45678901", "A4567890", "Public Bank", "3199 7788 9900"),
+    ("Rina Sari", "Rina", "Weekend Helper", "CASUAL", "DAILY", "90.00", "0.00", True, 1999,
+     "990615-06-5311", "", "", "Maybank", "5140 6677 8899"),
 ]
 
 
@@ -186,7 +192,8 @@ def seed_demo_data(*, months: int = 3, seed: int = 20260819) -> dict:
         # The team
         # ------------------------------------------------------------------ #
         for (
-            name, nickname, position, employment, basis, rate, allowance, local, born
+            name, nickname, position, employment, basis, rate, allowance, local, born,
+            ic, epf_no, socso_no, bank, account,
         ) in DEMO_EMPLOYEES:
             db.add(
                 Employee(
@@ -202,6 +209,11 @@ def seed_demo_data(*, months: int = 3, seed: int = 20260819) -> dict:
                     contributes_statutory=employment != "CASUAL",
                     is_local=local,
                     date_of_birth=date(born, 6, 15),
+                    ic_number=ic,
+                    epf_number=epf_no,
+                    socso_number=socso_no,
+                    bank_name=bank,
+                    bank_account=account,
                     joined_on=start,
                 )
             )
