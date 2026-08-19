@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Two themes live side by side.
+ *
+ * `.theme-owner` is built for a 70-year-old in a bright kitchen: white surface,
+ * near-black ink, nothing below 3:1 against the background, and no decoration
+ * that could be mistaken for a control.
+ *
+ * `.theme-accountant` is the dark analytical surface: deep navy, luminous
+ * accents, dense information.
+ *
+ * The `--series-*` values are the validated chart palette. They are stepped per
+ * mode rather than flipped, because their separation under colour-vision
+ * deficiency was measured against each surface.
+ */
+
+.theme-owner {
+  color-scheme: light;
+
+  --surface-base: #f7f7f5;
+  --surface-raised: #ffffff;
+  --surface-sunken: #ecebe7;
+  --surface-border: #d5d3cc;
+
+  --text-primary: #101010;
+  --text-secondary: #3f3e3b;
+  --text-muted: #5f5e59;
+  --text-inverse: #ffffff;
+
+  --accent: #1c5cab;
+  --accent-soft: rgba(28, 92, 171, 0.16);
+  --accent-glow: rgba(28, 92, 171, 0.28);
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Chart surface is the white card. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+}
+
+.theme-accountant {
+  color-scheme: dark;
+
+  --surface-base: #0a0f1c;
+  --surface-raised: #141c30;
+  --surface-sunken: #0d1424;
+  --surface-border: #24304d;
+
+  --text-primary: #f2f5fb;
+  --text-secondary: #a9b6d0;
+  --text-muted: #71809d;
+  --text-inverse: #0a0f1c;
+
+  --accent: #4cc9f0;
+  --accent-soft: rgba(76, 201, 240, 0.16);
+  --accent-glow: rgba(76, 201, 240, 0.35);
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Chart surface is the raised card, #141c30. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Money and metrics line up column-wise when digits share a width. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Focus must be obvious for someone who navigates slowly. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* The moving background on the accountant dashboard. Purely decorative. */
+.grid-backdrop {
+  background-image:
+    linear-gradient(to right, rgba(76, 201, 240, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(76, 201, 240, 0.07) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.glass {
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.015) 55%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  backdrop-filter: blur(12px);
+}
+
+.aurora {
+  background:
+    radial-gradient(60% 55% at 12% 8%, rgba(76, 201, 240, 0.20) 0%, transparent 60%),
+    radial-gradient(50% 45% at 88% 4%, rgba(120, 100, 255, 0.18) 0%, transparent 62%),
+    radial-gradient(55% 50% at 55% 100%, rgba(25, 158, 112, 0.14) 0%, transparent 60%);
+}
+
+/* Recharts draws its own focus ring on every element; we supply our own. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+/* Anyone who asks for less motion gets none of it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
