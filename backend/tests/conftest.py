@@ -16,6 +16,14 @@ _TMP_DIR = Path(tempfile.mkdtemp(prefix="restaurant-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DIR / 'test.db'}"
 os.environ["UPLOAD_DIR"] = str(_TMP_DIR / "uploads")
 
+# Environment variables beat the .env file, so this pins the test suite to a
+# known auth state regardless of whether the developer running it happens to
+# have Google credentials configured locally. Tests that want authentication
+# switch it on themselves through the `auth_on` fixture.
+os.environ["GOOGLE_CLIENT_ID"] = ""
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
+os.environ["SECRET_KEY"] = "test-only-signing-key"
+
 from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.seed import ensure_chart_of_accounts  # noqa: E402
 

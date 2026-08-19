@@ -10,11 +10,12 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
+from ..dependencies import require_user
 from ..models import Attachment
 from ..schemas import AttachmentOut
 from ..serializers import attachment_out
 
-router = APIRouter(prefix="/api/uploads", tags=["uploads"])
+router = APIRouter(dependencies=[Depends(require_user)], prefix="/api/uploads", tags=["uploads"])
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB is plenty for a phone photo of a receipt.

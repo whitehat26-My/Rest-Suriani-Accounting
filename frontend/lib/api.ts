@@ -5,6 +5,7 @@
  */
 import type {
   AccountBalance,
+  AuthStatus,
   AccountantDashboard,
   DailySummary,
   FinancialEvaluation,
@@ -44,6 +45,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init?.headers,
       },
       cache: "no-store",
+      // The session lives in an httpOnly cookie, so it has to be sent.
+      credentials: "include",
     });
   } catch {
     // A network failure here almost always means the backend is not running,
@@ -193,6 +196,23 @@ export const api = {
 
   createEmployee: (payload: Record<string, unknown>) =>
     post<EmployeeRecord>("/api/payroll/employees", payload),
+
+  // -------------------------------------------------------------------------
+  // Authentication
+  // -------------------------------------------------------------------------
+  authStatus: () => request<AuthStatus>("/api/auth/status"),
+
+  setPin: (newPin: string, currentPin?: string) =>
+    post<AuthStatus>("/api/auth/pin", {
+      new_pin: newPin,
+      current_pin: currentPin ?? null,
+    }),
+
+  verifyPin: (pin: string) => post<AuthStatus>("/api/auth/pin/verify", { pin }),
+
+  lockAccountantMode: () => post<{ locked: boolean }>("/api/auth/lock"),
+
+  signOut: () => post<{ signed_out: boolean }>("/api/auth/logout"),
 
   updateEmployee: (id: number, payload: Record<string, unknown>) =>
     request<EmployeeRecord>(`/api/payroll/employees/${id}`, {

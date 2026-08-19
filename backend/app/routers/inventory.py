@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dependencies import require_user
 from ..models import InventoryItem, InventoryMovement
 from ..schemas import (
     InventoryItemCreate,
@@ -22,7 +23,7 @@ from ..services import inventory as inventory_service
 from ..services.inventory import InventoryError
 from ..services.ledger import LedgerError, load_transaction
 
-router = APIRouter(prefix="/api/inventory", tags=["inventory"])
+router = APIRouter(dependencies=[Depends(require_user)], prefix="/api/inventory", tags=["inventory"])
 
 
 @router.get("", response_model=list[InventoryItemOut])

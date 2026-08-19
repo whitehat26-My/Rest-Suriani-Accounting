@@ -61,7 +61,7 @@ single origin and there is no CORS preflight in development.
 
 ```bash
 cd backend && source .venv/bin/activate
-pytest                              # 149 tests
+pytest                              # 249 tests
 ```
 
 ```bash
@@ -99,15 +99,22 @@ Rest-Suriani-Accounting/
 │   │   ├── serializers.py           ORM → API, incl. the plain-language layer
 │   │   ├── seed.py                  Chart bootstrap + 90 days of demo trading
 │   │   ├── utils.py                 Reporting-period helpers
+│   │   ├── security.py              PIN hashing and signed session tokens
+│   │   ├── dependencies.py          The access gates
 │   │   ├── services/
 │   │   │   ├── ledger.py            ── STEP 2a: the smart posting engine
 │   │   │   ├── statements.py        ── STEP 2b: the three statements
 │   │   │   ├── inventory.py         Weighted-average costing, COGS, stock counts
+│   │   │   ├── payroll.py           Runs, payslips, accrual and payment
+│   │   │   ├── payroll_rules.py     EPF, SOCSO and EIS rates in one place
+│   │   │   ├── auth.py              Google sign-in, roles, the PIN gate
 │   │   │   ├── analysis.py          Ratios, benchmarks, plain-language advice
 │   │   │   └── nlp.py               Voice/text sentence parser (EN + Malay)
 │   │   └── routers/
 │   │       ├── transactions.py      Quick entry, full entry, preview, reverse
 │   │       ├── inventory.py         Items, purchases, stock counts, stock card
+│   │       ├── payroll.py           Employees, runs, approval, remittances
+│   │       ├── auth.py              Sign-in, PIN, roles
 │   │       ├── reports.py           P&L, financial position, cash flows, TB
 │   │       ├── insights.py          Daily summary, evaluation, dashboard
 │   │       ├── accounts.py          Chart of accounts, general ledger
@@ -122,7 +129,8 @@ Rest-Suriani-Accounting/
     │   ├── globals.css              Both themes as CSS custom properties
     │   ├── page.tsx                 Role chooser
     │   ├── owner/page.tsx           ── STEP 3: Grandma Mode
-    │   └── accountant/page.tsx      ── STEP 4: Accountant Mode
+    │   ├── accountant/page.tsx      ── STEP 4: Accountant Mode
+    │   └── signin/page.tsx          Google sign-in
     ├── components/
     │   ├── owner/
     │   │   ├── TodayCard.tsx        Today at a glance, traffic-light verdict
@@ -134,9 +142,12 @@ Rest-Suriani-Accounting/
     │   │   ├── StockSheet.tsx       "Count Stock" with depletion bars
     │   │   ├── WeekChart.tsx        7-day money in/out
     │   │   └── RecentList.tsx       Today's entries, with undo
-    │   └── accountant/
-    │       ├── charts.tsx           Cash movement, cash position, expenses
-    │       └── panels.tsx           Health, ratios, advice, statements, trail
+    │   ├── accountant/
+    │   │   ├── charts.tsx           Cash movement, cash position, expenses
+    │   │   ├── panels.tsx           Health, ratios, advice, statements, trail
+    │   │   └── payroll.tsx          Runs, payslips, statutory remittances
+    │   └── auth/
+    │       └── PinGate.tsx          The Accountant Mode PIN keypad
     ├── lib/{api,types,format}.ts    Typed client, response types, formatting
     ├── tailwind.config.ts
     └── next.config.mjs
@@ -246,6 +257,114 @@ of the arithmetic.
 
 ---
 
+## Payroll
+
+Payroll is its own section of Accountant Mode and posts into the same ledger as
+everything else. A run has three states, and each one does a different job:
+
+| State | What it means |
+| --- | --- |
+| **Draft** | Freely editable. Nothing has touched the ledger, so a mistake costs nothing and leaves no correcting entry behind. |
+| **Approved** | Recognised in the books as one balanced accrual. |
+| **Paid** | Take-home pay has left the bank. |
+
+Approving posts a single entry that keeps three different things apart:
+
+| Account | Debit | Credit |
+| --- | ---: | ---: |
+| 6000 Salaries & Wages | gross | |
+| 6010 Employer Statutory Contributions | employer EPF + SOCSO + EIS | |
+| 2300 Net Wages Payable | | net pay |
+| 2310 / 2320 / 2330 EPF, SOCSO, EIS Payable | | employee + employer |
+| 2340 PCB Payable | | tax withheld |
+
+Gross pay is the wage cost. The employee's deductions are **not** a cost - they
+are the employee's own money, held briefly before being forwarded. The
+employer's contributions **are** an extra cost on top of gross, which is why
+they get their own account instead of being buried in wages.
+
+Paying settles only the net wages. Statutory money is remitted separately,
+because KWSP, PERKESO and LHDN are each paid on their own schedule and usually
+after the staff are. Splitting recognition from payment is what lets a month's
+profit statement show that month's true labour cost even when the wages are
+handed over in the first week of the next one.
+
+### Statutory contributions
+
+Rates live in `services/payroll_rules.py`, one file with every value named,
+because they change. Age and nationality are stored per employee: the EPF rate
+changes at 60, and EIS does not cover foreign workers, so neither can be
+assumed.
+
+**These are an approximation, deliberately and visibly.** EPF, SOCSO and EIS are
+published as banded schedules. This system applies the headline rates against
+the wage ceilings and rounds EPF up to the next ringgit, which tracks the
+schedules closely but is not identical band for band. That is accurate enough to
+run the books and see the true cost of labour; check the figures against the
+official schedule before filing a statutory return. The payroll screen says so
+too.
+
+### Two things worth knowing
+
+- A monthly salary **prorates** over a partial period. The same calculation
+  covers a mid-month run, someone joining and someone leaving.
+- If a cash wage was recorded through Grandma Mode's "Worker Pay" button inside
+  a run's period, the run **flags it**. That is the one way this module could
+  silently count the same wage twice.
+
+---
+
+## Signing in
+
+Identity comes from Google, so there is no password in this system to store,
+reset or leak. What is stored is the Google subject id, which survives someone
+changing their email address - the address itself does not.
+
+**Roles** decide what you may reach:
+
+| Role | Reaches |
+| --- | --- |
+| `STAFF` | The daily screen only - record money, count stock |
+| `OWNER` | Everything, and can change other people's roles |
+| `ACCOUNTANT` | Everything financial |
+
+The first person to sign in becomes the owner, which bootstraps the system
+without a default admin password. Everyone after that starts as `STAFF` and has
+to be promoted deliberately, so an unexpected sign-in reaches the daily screen
+at most - never the books.
+
+**The PIN** is separate from identity, and it is the boundary that actually
+matters day to day. The tablet sits unlocked beside the till for a whole shift,
+so a valid session says nothing about who is holding it. Opening Accountant Mode
+asks for a PIN, and it is mandatory rather than optional: an owner who has never
+set one is made to choose one on the way through. An optional gate that defaults
+to off is not a gate.
+
+The session lasts 90 days so the owner never meets a login screen; the unlock
+lasts 8 hours and can be closed instantly with **Lock**, which leaves the daily
+screen signed in.
+
+A four to six digit PIN has at most a million possibilities, so no hash makes it
+safe against someone with the database and time. It is stored with PBKDF2 at
+600,000 iterations, but the protection that does the real work is the attempt
+counter and lockout. Both are used; neither is sufficient alone.
+
+### Setting up Google sign-in
+
+1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials),
+   create an **OAuth 2.0 Client ID** of type *Web application*.
+2. Add `http://127.0.0.1:8000/api/auth/google/callback` as an authorised
+   redirect URI (and your production URL when you deploy).
+3. Put the client ID and secret in `backend/.env`, along with a `SECRET_KEY`.
+
+Until both Google values are set, **the app runs with no accounts and every
+endpoint is open**. That is a deliberate trade: an unconfigured install that
+refused every request would be unusable rather than secure. It is fine on a
+laptop, and the backend logs a warning at startup. Set the credentials before
+putting it anywhere other people can reach.
+
+---
+
 ## Accessibility
 
 Grandma Mode was built to a specific brief: zero cognitive load for a 70-year-old
@@ -295,6 +414,16 @@ answers that better than angle. Every chart offers the same numbers as a table.
 | `GET` | `/api/insights/dashboard` | Everything Accountant Mode needs |
 | `GET` | `/api/accounts/{code}/ledger` | General ledger with running balance |
 | `POST` | `/api/uploads` | Receipt photo |
+| `GET` | `/api/payroll/overview` | Everything the payroll panel needs |
+| `POST` | `/api/payroll/runs` | Open a draft run for every active employee |
+| `PATCH` | `/api/payroll/payslips/{id}` | Edit one payslip, recompute the run |
+| `POST` | `/api/payroll/runs/{id}/approve` | Post the accrual to the ledger |
+| `POST` | `/api/payroll/runs/{id}/pay` | Settle the net wages |
+| `POST` | `/api/payroll/remit` | Forward EPF, SOCSO, EIS or PCB |
+| `GET` | `/api/auth/status` | Who is signed in, and is the device unlocked |
+| `GET` | `/api/auth/google/login` | Start Google sign-in |
+| `POST` | `/api/auth/pin/verify` | Unlock Accountant Mode on this device |
+| `POST` | `/api/auth/lock` | Close Accountant Mode, stay signed in |
 
 Reporting endpoints accept either explicit `start`/`end` dates or
 `period=today|week|month|quarter|year|all`.
@@ -318,7 +447,7 @@ Then `python -m app.seed` as before. For production, put a migration tool
 
 ## Testing
 
-149 tests, covering the things that must never break:
+249 tests, covering the things that must never break:
 
 | File | Covers |
 | --- | --- |
@@ -326,4 +455,6 @@ Then `python -m app.seed` as before. For production, put a migration tool
 | `test_statements.py` | Assets = Liabilities + Equity; cash flows reconcile; drawings stay out of profit; interest sits below operating profit |
 | `test_inventory.py` | Weighted-average costing; stock counts post to COGS or wastage; depletion bands |
 | `test_nlp.py` | Parsing across both languages; a quantity is never mistaken for a price |
+| `test_payroll.py` | Contribution rules across age and nationality, proration, the run lifecycle, and the ledger entries it produces |
+| `test_auth.py` | Every gate, role assignment, the PIN and its lockout, and token forgery |
 | `test_api.py` | The complete owner journey and accountant journey over HTTP |

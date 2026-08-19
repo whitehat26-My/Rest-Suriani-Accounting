@@ -416,3 +416,32 @@ export interface PayslipEdit {
   other_deductions?: string;
   note?: string;
 }
+
+
+// ---------------------------------------------------------------------------
+// Authentication
+// ---------------------------------------------------------------------------
+export type Role = "OWNER" | "ACCOUNTANT" | "STAFF";
+
+export interface UserAccount {
+  id: number;
+  email: string;
+  name: string;
+  picture_url: string;
+  role: Role;
+  is_active: boolean;
+  has_pin: boolean;
+  can_see_finances: boolean;
+}
+
+export interface AuthStatus {
+  /** False when Google sign-in is not configured; the app then runs open. */
+  auth_enabled: boolean;
+  signed_in: boolean;
+  user: UserAccount | null;
+  /** Whether Accountant Mode is unlocked on this device right now. */
+  unlocked: boolean;
+  /** Whether a PIN must be entered to open Accountant Mode at all. */
+  pin_required: boolean;
+  login_url: string;
+}

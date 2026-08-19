@@ -160,6 +160,19 @@ class TransactionSource(str, enum.Enum):
     SEED = "SEED"
 
 
+class Role(str, enum.Enum):
+    """What a signed-in person is allowed to reach.
+
+    ``STAFF`` covers the daily screen only. Wages, profit and the ledger are
+    exactly what a restaurant owner does not want a server reading over the
+    counter, so those need ``OWNER`` or ``ACCOUNTANT``.
+    """
+
+    OWNER = "OWNER"
+    ACCOUNTANT = "ACCOUNTANT"
+    STAFF = "STAFF"
+
+
 class EmploymentType(str, enum.Enum):
     PERMANENT = "PERMANENT"
     PART_TIME = "PART_TIME"
@@ -725,3 +738,61 @@ class Payslip(Base):
     def employer_cost(self) -> Decimal:
         """What the employee actually costs the restaurant."""
         return (self.gross_pay + self.employer_contributions).quantize(Decimal("0.01"))
+
+
+# --------------------------------------------------------------------------- #
+# Accounts and access
+# --------------------------------------------------------------------------- #
+class User(Base):
+    """Someone who can sign in.
+
+    Identity comes from Google, so there is no password here to store, reset or
+    leak. What is stored is the Google subject id - a stable identifier that
+    survives the person changing their email address, which the email itself
+    does not.
+
+    The PIN is separate from identity. It does not say *who* you are; it gates
+    the financial side of the app on *this device*, which is the boundary that
+    actually matters when a tablet sits unlocked beside the till all day.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Google's subject claim: stable across email changes, unlike the address.
+    google_sub: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    picture_url: Mapped[str] = mapped_column(String(500), default="")
+
+    role: Mapped[Role] = mapped_column(Enum(Role), default=Role.STAFF, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # PIN gate for Accountant Mode. Never stored in the clear.
+    pin_hash: Mapped[str] = mapped_column(String(255), default="")
+    pin_set_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Failed attempts are counted so a four-digit PIN cannot simply be guessed.
+    pin_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    pin_locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    @property
+    def has_pin(self) -> bool:
+        return bool(self.pin_hash)
+
+    @property
+    def can_see_finances(self) -> bool:
+        return self.role in (Role.OWNER, Role.ACCOUNTANT)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return f"<User {self.email} {self.role.value}>"

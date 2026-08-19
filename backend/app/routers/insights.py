@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import chart_of_accounts as coa
 from ..database import get_db
+from ..dependencies import require_finance, require_user
 from ..models import EntrySide, LedgerEntry, Transaction
 from ..schemas import (
     AccountantDashboardOut,
@@ -24,7 +25,7 @@ from ..utils import resolve_period
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
 
-@router.get("/daily", response_model=DailySummaryOut)
+@router.get("/daily", response_model=DailySummaryOut, dependencies=[Depends(require_user)])
 def daily_summary(day: date | None = None, db: Session = Depends(get_db)) -> DailySummaryOut:
     """Everything Grandma Mode needs on one screen.
 
@@ -113,7 +114,7 @@ def daily_summary(day: date | None = None, db: Session = Depends(get_db)) -> Dai
     )
 
 
-@router.get("/week", response_model=list[TrendPoint])
+@router.get("/week", response_model=list[TrendPoint], dependencies=[Depends(require_user)])
 def week_trend(days: int = 7, db: Session = Depends(get_db)) -> list[TrendPoint]:
     """A short cash trend for the owner's simple bar chart."""
     end = date.today()
@@ -121,7 +122,7 @@ def week_trend(days: int = 7, db: Session = Depends(get_db)) -> list[TrendPoint]
     return analysis.daily_trend(db, start, end)
 
 
-@router.get("/evaluation", response_model=FinancialEvaluationOut)
+@router.get("/evaluation", response_model=FinancialEvaluationOut, dependencies=[Depends(require_finance)])
 def evaluation(
     start: date | None = None,
     end: date | None = None,
@@ -133,7 +134,7 @@ def evaluation(
     return analysis.evaluate(db, start, end)
 
 
-@router.get("/dashboard", response_model=AccountantDashboardOut)
+@router.get("/dashboard", response_model=AccountantDashboardOut, dependencies=[Depends(require_finance)])
 def accountant_dashboard(
     start: date | None = None,
     end: date | None = None,

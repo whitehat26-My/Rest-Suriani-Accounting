@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import chart_of_accounts as coa
 from ..database import get_db
+from ..dependencies import require_finance
 from ..models import Employee, PayrollRun, Payslip
 from ..schemas import (
     EmployeeCreate,
@@ -29,7 +30,7 @@ from ..services.payroll import PayrollError
 from ..services.payroll_rules import ACTIVE_RULES
 from ..utils import resolve_period
 
-router = APIRouter(prefix="/api/payroll", tags=["payroll"])
+router = APIRouter(dependencies=[Depends(require_finance)], prefix="/api/payroll", tags=["payroll"])
 
 
 def _fail(exc: Exception) -> HTTPException:

@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
+from ..dependencies import require_finance, require_user
 from ..models import Attachment, EventType, LedgerEntry, Transaction
 from ..schemas import (
     QuickEntry,
@@ -68,7 +69,7 @@ def _link_inventory(db: Session, txn: Transaction, request: TransactionCreate) -
     )
 
 
-@router.post("", response_model=TransactionOut, status_code=201)
+@router.post("", response_model=TransactionOut, status_code=201, dependencies=[Depends(require_finance)])
 def create_transaction(
     payload: TransactionCreate, db: Session = Depends(get_db)
 ) -> TransactionOut:
@@ -84,7 +85,7 @@ def create_transaction(
     return transaction_out(load_transaction(db, txn.id))
 
 
-@router.post("/quick", response_model=TransactionOut, status_code=201)
+@router.post("/quick", response_model=TransactionOut, status_code=201, dependencies=[Depends(require_user)])
 def create_quick_entry(payload: QuickEntry, db: Session = Depends(get_db)) -> TransactionOut:
     """The only write endpoint Grandma Mode uses.
 
@@ -103,7 +104,7 @@ def create_quick_entry(payload: QuickEntry, db: Session = Depends(get_db)) -> Tr
     return transaction_out(load_transaction(db, txn.id))
 
 
-@router.post("/preview", response_model=list[dict])
+@router.post("/preview", response_model=list[dict], dependencies=[Depends(require_finance)])
 def preview_entries(payload: TransactionCreate) -> list[dict]:
     """Show the debits and credits an event would produce, without saving.
 
@@ -127,13 +128,13 @@ def preview_entries(payload: TransactionCreate) -> list[dict]:
     ]
 
 
-@router.post("/parse", response_model=VoiceParseResponse)
+@router.post("/parse", response_model=VoiceParseResponse, dependencies=[Depends(require_user)])
 def parse_speech(payload: VoiceParseRequest, db: Session = Depends(get_db)) -> VoiceParseResponse:
     """Interpret a spoken sentence. Nothing is saved - the owner confirms first."""
     return nlp.parse(db, payload.text)
 
 
-@router.get("", response_model=TransactionListOut)
+@router.get("", response_model=TransactionListOut, dependencies=[Depends(require_finance)])
 def list_transactions(
     start: date | None = None,
     end: date | None = None,
@@ -175,7 +176,7 @@ def list_transactions(
     return TransactionListOut(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/recent", response_model=list[TransactionOut])
+@router.get("/recent", response_model=list[TransactionOut], dependencies=[Depends(require_user)])
 def recent_transactions(
     limit: int = Query(default=10, ge=1, le=50), db: Session = Depends(get_db)
 ) -> list[TransactionOut]:
@@ -192,7 +193,7 @@ def recent_transactions(
     return [transaction_out(txn) for txn in db.scalars(stmt).all()]
 
 
-@router.get("/{txn_id}", response_model=TransactionOut)
+@router.get("/{txn_id}", response_model=TransactionOut, dependencies=[Depends(require_finance)])
 def get_transaction(txn_id: int, db: Session = Depends(get_db)) -> TransactionOut:
     txn = load_transaction(db, txn_id)
     if txn is None:
@@ -200,7 +201,7 @@ def get_transaction(txn_id: int, db: Session = Depends(get_db)) -> TransactionOu
     return transaction_out(txn)
 
 
-@router.post("/{txn_id}/reverse", response_model=TransactionOut, status_code=201)
+@router.post("/{txn_id}/reverse", response_model=TransactionOut, status_code=201, dependencies=[Depends(require_user)])
 def reverse(txn_id: int, reason: str = "", db: Session = Depends(get_db)) -> TransactionOut:
     """Undo a mistake by posting the mirror image, keeping the audit trail."""
     txn = load_transaction(db, txn_id)

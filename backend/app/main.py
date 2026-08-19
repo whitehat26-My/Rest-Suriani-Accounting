@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -10,6 +11,7 @@ from .config import settings
 from .database import init_db
 from .routers import (
     accounts,
+    auth,
     insights,
     inventory,
     payroll,
@@ -17,6 +19,8 @@ from .routers import (
     transactions,
     uploads,
 )
+
+logger = logging.getLogger("uvicorn.error")
 
 DESCRIPTION = """
 An accounting system for a small restaurant, built for two very different people.
@@ -40,6 +44,19 @@ async def lifespan(_app: FastAPI):
     from .seed import ensure_chart_of_accounts
 
     ensure_chart_of_accounts()
+
+    if not settings.auth_enabled:
+        logger.warning(
+            "Google sign-in is not configured, so every endpoint is open. "
+            "This is fine on a laptop; set GOOGLE_CLIENT_ID and "
+            "GOOGLE_CLIENT_SECRET in backend/.env before putting this "
+            "anywhere other people can reach."
+        )
+    if settings.auth_enabled and not settings.cookie_secure:
+        logger.warning(
+            "COOKIE_SECURE is off, so session cookies will be sent over plain "
+            "http. Turn it on once the app is served over https."
+        )
     yield
 
 
@@ -58,6 +75,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(transactions.router)
 app.include_router(inventory.router)
@@ -85,6 +103,7 @@ def client_config() -> dict:
     return {
         "business_name": settings.business_name,
         "currency": settings.currency,
+        "auth_enabled": settings.auth_enabled,
         "spending_categories": [
             {"slug": slug, "label": label, "emoji": emoji, "account_code": code}
             for slug, label, emoji, code in SPENDING_CATEGORIES

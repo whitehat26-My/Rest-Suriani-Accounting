@@ -32,6 +32,8 @@ import {
   SuggestionList,
 } from "@/components/accountant/panels";
 import { PayrollPanel } from "@/components/accountant/payroll";
+import { PinGate } from "@/components/auth/PinGate";
+import { canOpenFinance, useAuth } from "@/lib/useAuth";
 
 const PERIODS = [
   { id: "week", label: "7 days" },
@@ -51,6 +53,7 @@ type View = (typeof VIEWS)[number]["id"];
 export default function AccountantPage() {
   const [period, setPeriod] = useState<string>("month");
   const [view, setView] = useState<View>("overview");
+  const { status, loading: authLoading, setStatus } = useAuth();
   const [data, setData] = useState<AccountantDashboard | null>(null);
   const [trail, setTrail] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,9 +76,54 @@ export default function AccountantPage() {
     }
   }, []);
 
+  const open = canOpenFinance(status);
+
   useEffect(() => {
-    if (view === "overview") void load(period);
-  }, [load, period, view]);
+    if (open && view === "overview") void load(period);
+  }, [load, period, view, open]);
+
+  // Someone who is not signed in at all belongs on the sign-in page, not on a
+  // dashboard full of empty panels.
+  useEffect(() => {
+    if (!authLoading && status?.auth_enabled && !status.signed_in) {
+      window.location.replace("/signin?redirect_to=%2Faccountant");
+    }
+  }, [authLoading, status]);
+
+  if (authLoading || (status?.auth_enabled && !status.signed_in)) {
+    return <main className="theme-accountant min-h-screen bg-surface-base" />;
+  }
+
+  // Signed in, but this account may not see money at all.
+  if (status?.auth_enabled && !status.user?.can_see_finances) {
+    return (
+      <main className="theme-accountant flex min-h-screen items-center justify-center bg-surface-base px-6">
+        <div className="glass max-w-md rounded-xl3 border border-surface-border p-10 text-center">
+          <span className="text-4xl" aria-hidden="true">
+            🔒
+          </span>
+          <h1 className="mt-4 text-2xl font-bold text-ink-primary">
+            This part is for the owner
+          </h1>
+          <p className="mt-3 text-base leading-relaxed text-ink-secondary">
+            Your account can record money on the daily screen, but the accounts,
+            reports and payroll are limited to the owner and the accountant.
+          </p>
+          <Link
+            href="/owner"
+            className="mt-7 inline-block rounded-xl bg-accent-soft px-6 py-3 text-sm font-semibold text-ink-primary ring-1 ring-inset ring-accent"
+          >
+            Go to the daily screen
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  // Signed in and allowed, but the device is locked.
+  if (status && !open) {
+    return <PinGate status={status} onUnlocked={setStatus} />;
+  }
 
   return (
     <main className="theme-accountant relative min-h-screen bg-surface-base">
@@ -146,6 +194,18 @@ export default function AccountantPage() {
               >
                 Daily screen
               </Link>
+              {status?.auth_enabled && status.pin_required ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await api.lockAccountantMode();
+                    setStatus({ ...status, unlocked: false });
+                  }}
+                  className="rounded-lg border border-surface-border px-4 py-2 text-sm font-medium text-ink-secondary transition-colors hover:text-ink-primary"
+                >
+                  Lock
+                </button>
+              ) : null}
             </div>
           </div>
         </header>

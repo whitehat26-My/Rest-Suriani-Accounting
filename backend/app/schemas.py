@@ -17,6 +17,7 @@ from .models import (
     PayBasis,
     PaymentMethod,
     PayrollStatus,
+    Role,
     TransactionSource,
 )
 
@@ -688,3 +689,47 @@ class PayrollOverviewOut(BaseModel):
     period_wage_cost: Decimal
     period_employer_contributions: Decimal
     rules_label: str
+
+
+# --------------------------------------------------------------------------- #
+# Authentication
+# --------------------------------------------------------------------------- #
+class UserOut(BaseModel):
+    model_config = ORM
+
+    id: int
+    email: str
+    name: str
+    picture_url: str
+    role: Role
+    is_active: bool
+    has_pin: bool
+    can_see_finances: bool
+
+
+class AuthStatusOut(BaseModel):
+    """Everything the frontend needs to decide what to show."""
+
+    # False when Google sign-in is not configured, in which case the app runs
+    # open as a single-user local tool.
+    auth_enabled: bool
+    signed_in: bool
+    user: UserOut | None = None
+    # Whether Accountant Mode is currently unlocked on this device.
+    unlocked: bool = False
+    # Whether a PIN has to be entered to open Accountant Mode at all.
+    pin_required: bool = False
+    login_url: str = "/api/auth/google/login"
+
+
+class PinSet(BaseModel):
+    new_pin: str = Field(min_length=4, max_length=8)
+    current_pin: str | None = None
+
+
+class PinVerify(BaseModel):
+    pin: str = Field(min_length=4, max_length=8)
+
+
+class RoleUpdate(BaseModel):
+    role: Role

@@ -28,6 +28,7 @@ import { StockSheet } from "@/components/owner/StockSheet";
 import { TodayCard } from "@/components/owner/TodayCard";
 import { VoiceInput } from "@/components/owner/VoiceInput";
 import { WeekChart } from "@/components/owner/WeekChart";
+import { useAuth } from "@/lib/useAuth";
 
 type Screen = "home" | "in" | "out" | "voice" | "stock";
 
@@ -41,6 +42,7 @@ export default function OwnerPage() {
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { status, loading: authLoading } = useAuth();
 
   const load = useCallback(async () => {
     try {
@@ -62,9 +64,15 @@ export default function OwnerPage() {
     }
   }, []);
 
+  const signedOut = Boolean(status?.auth_enabled && !status.signed_in);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!authLoading && signedOut) {
+      window.location.replace("/signin?redirect_to=%2Fowner");
+      return;
+    }
+    if (!authLoading && !signedOut) void load();
+  }, [authLoading, signedOut, load]);
 
   // The confirmation banner is the owner's receipt that the tap worked.
   useEffect(() => {
@@ -130,7 +138,11 @@ export default function OwnerPage() {
       </AnimatePresence>
 
       <div className="mx-auto max-w-3xl px-5 py-7">
-        {loading ? (
+        {authLoading || signedOut ? (
+          <p className="py-24 text-center text-3xl font-semibold text-ink-secondary">
+            Loading…
+          </p>
+        ) : loading ? (
           <p className="py-24 text-center text-3xl font-semibold text-ink-secondary">
             Loading…
           </p>

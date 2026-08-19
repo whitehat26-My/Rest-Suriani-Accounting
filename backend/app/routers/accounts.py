@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dependencies import require_finance, require_user
 from ..models import Account, EntrySide, LedgerEntry, Transaction
 from ..schemas import (
     AccountBalanceOut,
@@ -22,7 +23,7 @@ from ..services.ledger import ZERO, account_totals, money
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 
-@router.get("", response_model=list[AccountBalanceOut])
+@router.get("", response_model=list[AccountBalanceOut], dependencies=[Depends(require_finance)])
 def list_accounts(
     as_of: date | None = None,
     include_zero: bool = True,
@@ -49,7 +50,7 @@ def list_accounts(
     return out
 
 
-@router.get("/spending-categories", response_model=list[SpendingCategoryOut])
+@router.get("/spending-categories", response_model=list[SpendingCategoryOut], dependencies=[Depends(require_user)])
 def spending_categories() -> list[SpendingCategoryOut]:
     """The picture-labelled buttons Grandma Mode shows for Money Out."""
     return [
@@ -58,7 +59,7 @@ def spending_categories() -> list[SpendingCategoryOut]:
     ]
 
 
-@router.get("/{code}/ledger", response_model=GeneralLedgerOut)
+@router.get("/{code}/ledger", response_model=GeneralLedgerOut, dependencies=[Depends(require_finance)])
 def general_ledger(
     code: str,
     start: date | None = Query(default=None),

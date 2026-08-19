@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dependencies import require_finance
 from ..schemas import (
     BalanceSheetOut,
     CashFlowOut,
@@ -16,7 +17,7 @@ from ..schemas import (
 from ..services import statements
 from ..utils import resolve_period
 
-router = APIRouter(prefix="/api/reports", tags=["reports"])
+router = APIRouter(dependencies=[Depends(require_finance)], prefix="/api/reports", tags=["reports"])
 
 
 @router.get("/income-statement", response_model=IncomeStatementOut)
