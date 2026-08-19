@@ -299,6 +299,7 @@ def parse(db: Session, text: str) -> VoiceParseResponse:
         method=method,
         inventory_item_id=item.id if item else None,
         inventory_item_name=item.name if item else None,
+        inventory_item_unit=item.unit if item else None,
         quantity=qty,
         note=original,
         confirmation=confirmation,

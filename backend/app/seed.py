@@ -320,32 +320,47 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
                 week_takings = Decimal("0.00")
 
             # -------------------------------------------------------------- #
-            # Month-start fixed costs
+            # Fixed costs, spread across the month the way they really fall due
             # -------------------------------------------------------------- #
-            if day.day == 1:
-                for amount, code, label, event in (
+            FIXED_COSTS = {
+                1: [
                     (Decimal("3000.00"), coa.RENT, "Monthly shop rent", EventType.EXPENSE_CASH),
-                    (Decimal("9600.00"), coa.WAGES, "Staff wages", EventType.PAY_WAGES),
-                    (Decimal("1300.00"), coa.UTILITIES, "Electricity, water and gas", EventType.EXPENSE_CASH),
-                    (Decimal("700.00"), coa.SUPPLIES, "Packaging and cleaning", EventType.EXPENSE_CASH),
-                    (Decimal("300.00"), coa.MARKETING, "Facebook promotion", EventType.EXPENSE_CASH),
-                    (Decimal("400.00"), coa.TRANSPORT, "Petrol and delivery", EventType.EXPENSE_CASH),
-                ):
-                    post(
-                        event_type=event,
-                        amount=amount,
-                        txn_date=day,
-                        description=label,
-                        expense_account_code=code,
-                        payment_method=PaymentMethod.BANK,
-                    )
+                ],
+                5: [
+                    (Decimal("400.00"), coa.TRANSPORT, "Petrol and delivery",
+                     EventType.EXPENSE_CASH),
+                ],
+                7: [
+                    (Decimal("4800.00"), coa.WAGES, "Staff wages (first half)",
+                     EventType.PAY_WAGES),
+                ],
+                12: [
+                    (Decimal("1300.00"), coa.UTILITIES, "Electricity, water and gas",
+                     EventType.EXPENSE_CASH),
+                    (Decimal("300.00"), coa.MARKETING, "Facebook promotion",
+                     EventType.EXPENSE_CASH),
+                ],
+                18: [
+                    (Decimal("700.00"), coa.SUPPLIES, "Packaging and cleaning",
+                     EventType.EXPENSE_CASH),
+                ],
+                22: [
+                    (Decimal("4800.00"), coa.WAGES, "Staff wages (second half)",
+                     EventType.PAY_WAGES),
+                ],
+            }
 
+            for amount, code, label, event in FIXED_COSTS.get(day.day, []):
                 post(
-                    event_type=EventType.DEPRECIATION,
-                    amount=Decimal("467.00"),
+                    event_type=event,
+                    amount=amount,
                     txn_date=day,
-                    description="Monthly depreciation on kitchen equipment",
+                    description=label,
+                    expense_account_code=code,
+                    payment_method=PaymentMethod.BANK,
                 )
+
+            if day.day == 3:
                 post(
                     event_type=EventType.LOAN_REPAYMENT,
                     amount=Decimal("720.00"),
@@ -355,12 +370,23 @@ def seed_demo_data(*, days: int = 90, seed: int = 20260819) -> dict:
                     interest_amount=Decimal("62.00"),
                     payment_method=PaymentMethod.BANK,
                 )
+
+            if day.day == 26:
                 post(
                     event_type=EventType.OWNER_DRAWINGS,
                     amount=Decimal("2000.00"),
                     txn_date=day,
                     description="Owner's monthly drawings",
                     payment_method=PaymentMethod.BANK,
+                )
+
+            # Depreciation is a month-end adjustment, not a payment.
+            if (day + timedelta(days=1)).month != day.month:
+                post(
+                    event_type=EventType.DEPRECIATION,
+                    amount=Decimal("467.00"),
+                    txn_date=day,
+                    description="Monthly depreciation on kitchen equipment",
                 )
 
             # Occasional one-off repair.

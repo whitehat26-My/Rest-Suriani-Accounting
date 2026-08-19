@@ -249,7 +249,7 @@ def evaluate(db: Session, start: date, end: date) -> FinancialEvaluationOut:
             display=_fmt_pct(food_cost_pct),
             unit="%",
             rating=_band(food_cost_pct, good=(0, 35), watch=(35, 40)),
-            benchmark="28% - 35% of sales",
+            benchmark="35% of sales or below",
             explanation="How much of each ringgit of sales is spent on ingredients.",
         ),
         MetricOut(
@@ -259,8 +259,9 @@ def evaluate(db: Session, start: date, end: date) -> FinancialEvaluationOut:
             display=_fmt_pct(labour_pct),
             unit="%",
             rating=_band(labour_pct, good=(0, 35), watch=(35, 42)),
-            benchmark="25% - 35% of sales",
-            explanation="Wages as a share of sales.",
+            benchmark="35% of sales or below",
+            explanation="Wages as a share of sales. The 25% - 35% band is typical; "
+            "below it usually means the owner works unpaid shifts.",
         ),
         MetricOut(
             key="prime_cost",

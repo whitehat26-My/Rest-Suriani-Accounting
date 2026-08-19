@@ -130,6 +130,8 @@ class TransactionOut(BaseModel):
 
     # Plain-language summary for Grandma Mode ("Money in - RM120 from customers").
     friendly_summary: str = ""
+    # The same thing without the amount, for lists that show the figure alongside.
+    friendly_label: str = ""
     direction: str = "neutral"  # "in", "out" or "neutral"
 
 
@@ -197,6 +199,7 @@ class VoiceParseResponse(BaseModel):
     method: PaymentMethod = PaymentMethod.CASH
     inventory_item_id: int | None = None
     inventory_item_name: str | None = None
+    inventory_item_unit: str | None = None
     quantity: Decimal | None = None
     note: str = ""
     # A sentence read back to the owner for confirmation.

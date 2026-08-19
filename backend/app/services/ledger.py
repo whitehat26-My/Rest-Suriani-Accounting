@@ -367,6 +367,21 @@ EVENT_DIRECTION: dict[EventType, str] = {
     EventType.CASH_WITHDRAWAL: "neutral",
 }
 
+# Postings the system makes on its own. The owner never triggered these, so they
+# are kept off her daily list - showing her "Opening stock: Sugar" beside her own
+# entries would just be noise she cannot act on. They remain fully visible in
+# Accountant Mode and in every report.
+SYSTEM_ONLY_EVENTS: frozenset[EventType] = frozenset(
+    {
+        EventType.OPENING_INVENTORY,
+        EventType.COGS_USAGE,
+        EventType.STOCK_WASTAGE,
+        EventType.STOCK_ADJUSTMENT_GAIN,
+        EventType.DEPRECIATION,
+    }
+)
+
+
 # Plain-language names, so no screen ever has to say "Accounts Payable".
 EVENT_FRIENDLY: dict[EventType, str] = {
     EventType.CASH_SALE: "Money in from customers",

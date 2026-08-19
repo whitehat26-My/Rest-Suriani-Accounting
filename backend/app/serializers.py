@@ -26,6 +26,15 @@ def attachment_out(attachment: Attachment) -> AttachmentOut:
     )
 
 
+def friendly_label(txn: Transaction) -> str:
+    """Short plain-language name, for lists that display the amount separately."""
+    label = EVENT_FRIENDLY.get(txn.event_type, txn.event_type.value.replace("_", " ").title())
+    if txn.counterparty:
+        direction = EVENT_DIRECTION.get(txn.event_type, "neutral")
+        return f"{label} {'from' if direction == 'in' else 'to'} {txn.counterparty}"
+    return label
+
+
 def friendly_summary(txn: Transaction) -> str:
     """One sentence an owner can read without knowing any accounting.
 
@@ -71,6 +80,7 @@ def transaction_out(txn: Transaction) -> TransactionOut:
         ],
         attachments=[attachment_out(a) for a in txn.attachments],
         friendly_summary=friendly_summary(txn),
+        friendly_label=friendly_label(txn),
         direction=EVENT_DIRECTION.get(txn.event_type, "neutral"),
     )
 

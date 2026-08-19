@@ -18,7 +18,7 @@ from ..schemas import (
 )
 from ..serializers import inventory_item_out, transaction_out
 from ..services import analysis, inventory as inventory_service, statements
-from ..services.ledger import ZERO, account_balances, money
+from ..services.ledger import SYSTEM_ONLY_EVENTS, ZERO, account_balances, money
 from ..utils import resolve_period
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
@@ -66,13 +66,22 @@ def daily_summary(day: date | None = None, db: Session = Depends(get_db)) -> Dai
             selectinload(Transaction.entries).selectinload(LedgerEntry.account),
             selectinload(Transaction.attachments),
         )
-        .where(Transaction.txn_date == day)
+        .where(
+            Transaction.txn_date == day,
+            Transaction.event_type.not_in(SYSTEM_ONLY_EVENTS),
+        )
         .order_by(Transaction.id.desc())
         .limit(8)
     ).all()
 
     transaction_count = (
-        db.scalar(select(func.count(Transaction.id)).where(Transaction.txn_date == day)) or 0
+        db.scalar(
+            select(func.count(Transaction.id)).where(
+                Transaction.txn_date == day,
+                Transaction.event_type.not_in(SYSTEM_ONLY_EVENTS),
+            )
+        )
+        or 0
     )
 
     low_stock = inventory_service.low_stock_items(db)
